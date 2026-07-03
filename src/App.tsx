@@ -1,13 +1,12 @@
 import {
-  BarChart3,
   CalendarDays,
   CheckCircle2,
   ChevronDown,
   Clock3,
-  ListChecks,
   PieChart,
   Plus,
   Trash2,
+  X,
 } from "lucide-react";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabase";
@@ -58,6 +57,7 @@ type DbCompletion = {
 
 const weekLabels = ["D", "S", "T", "Q", "Q", "S", "S"];
 const fullWeekLabels = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
+const donutColors = ["#7c3aed", "#a855f7", "#c084fc", "#8b5cf6", "#d8b4fe", "#6d28d9"];
 const today = toDateInput(new Date());
 
 const defaultRule: CustomRule = {
@@ -119,7 +119,9 @@ export function App() {
   const [form, setForm] = useState(emptyForm);
   const [customRule, setCustomRule] = useState<CustomRule>(defaultRule);
   const [customOpen, setCustomOpen] = useState(false);
+  const [itemModalOpen, setItemModalOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState(today);
+  const [viewMode, setViewMode] = useState<"day" | "week">("day");
   const [syncState, setSyncState] = useState("local");
 
   useEffect(() => {
@@ -180,6 +182,8 @@ export function App() {
   const occupancy = useMemo(() => buildOccupancy(dayItems), [dayItems]);
   const totalMinutes = occupancy.reduce((sum, item) => sum + item.minutes, 0);
   const biggestBlock = occupancy[0];
+  const weekDays = useMemo(() => buildWeekDays(selectedDate), [selectedDate]);
+  const timeGradient = buildDonutGradient(occupancy, totalMinutes);
 
   async function addItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -199,6 +203,7 @@ export function App() {
 
     setItems((current) => [...current, nextItem]);
     setForm({ ...emptyForm, startsOn: selectedDate });
+    setItemModalOpen(false);
 
     if (supabase) {
       const { error } = await supabase.from("route_items").insert(toDbItem(nextItem));
@@ -206,14 +211,14 @@ export function App() {
     }
   }
 
-  async function toggleItem(itemId: string) {
-    const currentValue = Boolean(completions[itemId]?.[selectedDate]);
+  async function toggleItem(itemId: string, dateValue = selectedDate) {
+    const currentValue = Boolean(completions[itemId]?.[dateValue]);
     const nextValue = !currentValue;
     setCompletions((current) => ({
       ...current,
       [itemId]: {
         ...current[itemId],
-        [selectedDate]: nextValue,
+        [dateValue]: nextValue,
       },
     }));
 
@@ -221,7 +226,7 @@ export function App() {
       const { error } = await supabase.from("route_completions").upsert(
         {
           item_id: itemId,
-          completed_on: selectedDate,
+          completed_on: dateValue,
           completed: nextValue,
         },
         { onConflict: "item_id,completed_on" },
@@ -258,7 +263,20 @@ export function App() {
           <p className="eyebrow">Checklist</p>
           <h1>Rota do dia</h1>
         </div>
-        <div className="sync-pill">{syncState === "supabase" ? "Supabase ativo" : "Modo local"}</div>
+        <div className="top-actions">
+          <div className="sync-pill">{syncState === "supabase" ? "Supabase ativo" : "Modo local"}</div>
+          <button
+            className="primary-button add-item-button"
+            type="button"
+            onClick={() => {
+              setForm((current) => ({ ...current, startsOn: selectedDate }));
+              setItemModalOpen(true);
+            }}
+          >
+            <Plus size={18} />
+            Cadastrar item
+          </button>
+        </div>
       </section>
 
       <section className="dashboard-grid">
@@ -283,7 +301,7 @@ export function App() {
           </div>
         </article>
 
-        <article className="panel">
+        <article className="panel time-panel">
           <div className="panel-heading">
             <div>
               <p className="eyebrow">Tempo</p>
@@ -291,101 +309,24 @@ export function App() {
             </div>
             <PieChart />
           </div>
-          <div className="time-list">
-            {occupancy.map((entry) => (
-              <div className="time-row" key={entry.category}>
-                <div>
-                  <strong>{entry.category}</strong>
-                  <span>{formatMinutes(entry.minutes)}</span>
+          <div className="time-donut-layout">
+            <div className="time-donut" style={{ "--segments": timeGradient } as React.CSSProperties}>
+              <span>{formatMinutes(totalMinutes)}</span>
+            </div>
+            <div className="time-list">
+              {occupancy.map((entry, index) => (
+                <div className="time-legend-row" key={entry.category}>
+                  <i style={{ background: donutColors[index % donutColors.length] }} />
+                  <div>
+                    <strong>{entry.category}</strong>
+                    <span>{formatMinutes(entry.minutes)}</span>
+                  </div>
                 </div>
-                <div className="track">
-                  <span style={{ width: `${totalMinutes ? (entry.minutes / totalMinutes) * 100 : 0}%` }} />
-                </div>
-              </div>
-            ))}
-            {!occupancy.length && <p className="muted">Sem horarios cadastrados para este dia.</p>}
+              ))}
+              {!occupancy.length && <p className="muted">Sem horários cadastrados para este dia.</p>}
+            </div>
           </div>
           {biggestBlock && <p className="insight">Maior bloco: {biggestBlock.category}.</p>}
-        </article>
-
-        <article className="panel form-panel">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Novo item</p>
-              <h2>Adicionar tarefa</h2>
-            </div>
-            <Plus />
-          </div>
-          <form onSubmit={addItem} className="item-form">
-            <label>
-              Título
-              <input
-                value={form.title}
-                onChange={(event) => setForm({ ...form, title: event.target.value })}
-                placeholder="Ex.: estudo, treino, reunião"
-              />
-            </label>
-            <div className="form-row">
-              <label>
-                Data
-                <input
-                  type="date"
-                  value={form.startsOn}
-                  onChange={(event) => setForm({ ...form, startsOn: event.target.value })}
-                />
-              </label>
-              <label>
-                Categoria
-                <input
-                  value={form.category}
-                  onChange={(event) => setForm({ ...form, category: event.target.value })}
-                  placeholder="rotina"
-                />
-              </label>
-            </div>
-            <div className="form-row">
-              <label>
-                Início
-                <input
-                  type="time"
-                  value={form.startTime}
-                  onChange={(event) => setForm({ ...form, startTime: event.target.value })}
-                />
-              </label>
-              <label>
-                Fim
-                <input
-                  type="time"
-                  value={form.endTime}
-                  onChange={(event) => setForm({ ...form, endTime: event.target.value })}
-                />
-              </label>
-            </div>
-            <label>
-              Repetição
-              <div className="select-wrap">
-                <select value={form.repeatType} onChange={(event) => chooseRepeatType(event.target.value as RepeatType)}>
-                  <option value="none">Não se repete</option>
-                  <option value="daily">Todos os dias</option>
-                  <option value="weekly">Semanalmente</option>
-                  <option value="weekdays">Dias úteis</option>
-                  <option value="monthly">Mensalmente</option>
-                  <option value="yearly">Anualmente</option>
-                  <option value="custom">Personalizar...</option>
-                </select>
-                <ChevronDown />
-              </div>
-            </label>
-            {form.repeatType === "custom" && (
-              <button className="ghost-button" type="button" onClick={() => setCustomOpen(true)}>
-                Recorrência personalizada
-              </button>
-            )}
-            <button className="primary-button" type="submit">
-              <Plus size={18} />
-              Adicionar
-            </button>
-          </form>
         </article>
       </section>
 
@@ -393,59 +334,174 @@ export function App() {
         <div className="route-toolbar">
           <div>
             <p className="eyebrow">Agenda</p>
-            <h2>{formatDateLabel(selectedDate)}</h2>
+            <h2>{viewMode === "day" ? formatDateLabel(selectedDate) : formatWeekRange(weekDays)}</h2>
           </div>
-          <input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
+          <div className="route-controls">
+            <div className="segmented-control" aria-label="alternar visualização">
+              <button className={viewMode === "day" ? "active" : ""} type="button" onClick={() => setViewMode("day")}>
+                Dia
+              </button>
+              <button className={viewMode === "week" ? "active" : ""} type="button" onClick={() => setViewMode("week")}>
+                Semana
+              </button>
+            </div>
+            <input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
+          </div>
         </div>
 
-        <div className="route-list">
-          {dayItems.map((item) => {
-            const completed = Boolean(completions[item.id]?.[selectedDate]);
-            return (
-              <article className={`route-item ${completed ? "done" : ""}`} key={item.id}>
-                <button className="check-button" type="button" onClick={() => toggleItem(item.id)}>
-                  <CheckCircle2 />
-                </button>
-                <div className="route-time">
-                  <Clock3 size={16} />
-                  {item.startTime} - {item.endTime}
+        {viewMode === "day" ? (
+          <div className="route-list">
+            {dayItems.map((item) => {
+              const completed = Boolean(completions[item.id]?.[selectedDate]);
+              return (
+                <article className={`route-item ${completed ? "done" : ""}`} key={item.id}>
+                  <button className="check-button" type="button" onClick={() => toggleItem(item.id)}>
+                    <CheckCircle2 />
+                  </button>
+                  <div className="route-time">
+                    <Clock3 size={16} />
+                    {item.startTime} - {item.endTime}
+                  </div>
+                  <div className="route-copy">
+                    <h3>{item.title}</h3>
+                    <p>{item.category} · {repeatLabel(item)}</p>
+                  </div>
+                  <button className="icon-button" type="button" onClick={() => removeItem(item.id)} aria-label="remover">
+                    <Trash2 size={18} />
+                  </button>
+                </article>
+              );
+            })}
+            {!dayItems.length && (
+              <div className="empty-state">
+                <CalendarDays />
+                <p>Nenhum item para esta data.</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="week-board">
+            {weekDays.map((dateValue) => {
+              const itemsForDay = items
+                .filter((item) => item.active && occursOn(item, dateValue))
+                .sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+              return (
+                <div className={`week-column ${dateValue === selectedDate ? "selected" : ""}`} key={dateValue}>
+                  <button className="week-day-header" type="button" onClick={() => setSelectedDate(dateValue)}>
+                    <span>{weekdayShort(dateValue)}</span>
+                    <strong>{fromDateInput(dateValue).getDate()}</strong>
+                  </button>
+                  <div className="week-items">
+                    {itemsForDay.map((item) => {
+                      const completed = Boolean(completions[item.id]?.[dateValue]);
+                      return (
+                        <button
+                          className={`week-item ${completed ? "done" : ""}`}
+                          key={`${dateValue}-${item.id}`}
+                          type="button"
+                          onClick={() => toggleItem(item.id, dateValue)}
+                        >
+                          <span>{item.startTime} - {item.endTime}</span>
+                          <strong>{item.title}</strong>
+                          <small>{item.category}</small>
+                        </button>
+                      );
+                    })}
+                    {!itemsForDay.length && <p className="week-empty">Livre</p>}
+                  </div>
                 </div>
-                <div className="route-copy">
-                  <h3>{item.title}</h3>
-                  <p>{item.category} · {repeatLabel(item)}</p>
-                </div>
-                <button className="icon-button" type="button" onClick={() => removeItem(item.id)} aria-label="remover">
-                  <Trash2 size={18} />
-                </button>
-              </article>
-            );
-          })}
-          {!dayItems.length && (
-            <div className="empty-state">
-              <CalendarDays />
-              <p>Nenhum item para esta data.</p>
-            </div>
-          )}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
-      <section className="panel all-items">
-        <div className="panel-heading">
-          <div>
-            <p className="eyebrow">Checklist</p>
-            <h2>Itens cadastrados</h2>
-          </div>
-          <ListChecks />
-        </div>
-        <div className="compact-grid">
-          {items.map((item) => (
-            <div className="compact-item" key={item.id}>
-              <strong>{item.title}</strong>
-              <span>{item.startTime} - {item.endTime} · {repeatLabel(item)}</span>
+      {itemModalOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <section className="item-modal">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Novo item</p>
+                <h2>Adicionar tarefa</h2>
+              </div>
+              <button className="icon-button" type="button" onClick={() => setItemModalOpen(false)} aria-label="fechar">
+                <X size={18} />
+              </button>
             </div>
-          ))}
+            <form onSubmit={addItem} className="item-form">
+              <label>
+                Título
+                <input
+                  value={form.title}
+                  onChange={(event) => setForm({ ...form, title: event.target.value })}
+                  placeholder="Ex.: estudo, treino, reunião"
+                />
+              </label>
+              <div className="form-row">
+                <label>
+                  Data
+                  <input
+                    type="date"
+                    value={form.startsOn}
+                    onChange={(event) => setForm({ ...form, startsOn: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Categoria
+                  <input
+                    value={form.category}
+                    onChange={(event) => setForm({ ...form, category: event.target.value })}
+                    placeholder="rotina"
+                  />
+                </label>
+              </div>
+              <div className="form-row">
+                <label>
+                  Início
+                  <input
+                    type="time"
+                    value={form.startTime}
+                    onChange={(event) => setForm({ ...form, startTime: event.target.value })}
+                  />
+                </label>
+                <label>
+                  Fim
+                  <input
+                    type="time"
+                    value={form.endTime}
+                    onChange={(event) => setForm({ ...form, endTime: event.target.value })}
+                  />
+                </label>
+              </div>
+              <label>
+                Repetição
+                <div className="select-wrap">
+                  <select value={form.repeatType} onChange={(event) => chooseRepeatType(event.target.value as RepeatType)}>
+                    <option value="none">Não se repete</option>
+                    <option value="daily">Todos os dias</option>
+                    <option value="weekly">Semanalmente</option>
+                    <option value="weekdays">Dias úteis</option>
+                    <option value="monthly">Mensalmente</option>
+                    <option value="yearly">Anualmente</option>
+                    <option value="custom">Personalizar...</option>
+                  </select>
+                  <ChevronDown />
+                </div>
+              </label>
+              {form.repeatType === "custom" && (
+                <button className="ghost-button" type="button" onClick={() => setCustomOpen(true)}>
+                  Recorrência personalizada
+                </button>
+              )}
+              <button className="primary-button" type="submit">
+                <Plus size={18} />
+                Adicionar
+              </button>
+            </form>
+          </section>
         </div>
-      </section>
+      )}
 
       {customOpen && (
         <div className="modal-backdrop" role="dialog" aria-modal="true">
@@ -579,6 +635,23 @@ function addDays(value: string, days: number) {
   return toDateInput(date);
 }
 
+function buildWeekDays(value: string) {
+  const date = fromDateInput(value);
+  const start = addDays(value, -date.getDay());
+  return Array.from({ length: 7 }, (_, index) => addDays(start, index));
+}
+
+function formatWeekRange(days: string[]) {
+  if (!days.length) return "";
+  const first = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" }).format(fromDateInput(days[0]));
+  const last = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" }).format(fromDateInput(days[6]));
+  return `${first} - ${last}`;
+}
+
+function weekdayShort(value: string) {
+  return new Intl.DateTimeFormat("pt-BR", { weekday: "short" }).format(fromDateInput(value)).replace(".", "");
+}
+
 function formatDateLabel(value: string) {
   return new Intl.DateTimeFormat("pt-BR", {
     weekday: "long",
@@ -672,6 +745,20 @@ function buildOccupancy(items: RouteItem[]) {
   return Object.entries(grouped)
     .map(([category, minutes]) => ({ category, minutes }))
     .sort((a, b) => b.minutes - a.minutes);
+}
+
+function buildDonutGradient(occupancy: Array<{ category: string; minutes: number }>, totalMinutes: number) {
+  if (!totalMinutes) return "#eadcff 0deg 360deg";
+
+  let cursor = 0;
+  const segments = occupancy.map((entry, index) => {
+    const start = cursor;
+    const end = cursor + (entry.minutes / totalMinutes) * 360;
+    cursor = end;
+    return `${donutColors[index % donutColors.length]} ${start}deg ${end}deg`;
+  });
+
+  return segments.join(", ");
 }
 
 function repeatLabel(item: RouteItem) {
