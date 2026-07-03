@@ -108,6 +108,19 @@ h3 {
   padding: 0 18px;
 }
 
+.account-button {
+  min-width: 168px;
+  padding: 0 16px;
+  background: #fbf9ff;
+}
+
+.account-logout {
+  width: 42px;
+  color: #7c3aed;
+  background: #fbf9ff;
+  border: 1px solid #d8c5ff;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.95fr);
@@ -717,6 +730,43 @@ textarea {
   background: #ffffff;
 }
 
+.auth-card {
+  display: grid;
+  gap: 18px;
+  width: min(430px, 100%);
+  border-radius: 24px;
+  padding: 28px;
+  background: #ffffff;
+  box-shadow: 0 30px 80px rgba(37, 24, 56, 0.28);
+}
+
+.auth-tabs {
+  width: 100%;
+}
+
+.auth-form {
+  display: grid;
+  gap: 14px;
+}
+
+.auth-form .primary-button {
+  width: 100%;
+}
+
+.auth-message {
+  margin: 0;
+  color: #6f5e83;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.link-button {
+  justify-self: center;
+  padding: 6px 8px;
+  background: transparent;
+  color: #6d28d9;
+}
+
 .custom-modal h2,
 .item-modal h2 {
   font-size: 1.55rem;
@@ -819,6 +869,7 @@ textarea {
 
   .route-toolbar input,
   .date-navigation,
+  .account-button,
   .add-item-button {
     width: 100%;
     max-width: none;
@@ -861,6 +912,10 @@ textarea {
   .date-arrow {
     width: 42px;
     flex: 0 0 42px;
+  }
+
+  .account-logout {
+    width: 42px;
   }
 
   .check-button {

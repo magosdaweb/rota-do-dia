@@ -6,18 +6,22 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
+  LogOut,
   Pencil,
   PieChart,
   Plus,
   Tag,
   Trash2,
+  UserRound,
   X,
 } from "lucide-react";
+import type { Session } from "@supabase/supabase-js";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabase";
 
 type RepeatType = "none" | "daily" | "weekly" | "weekdays" | "monthly" | "yearly" | "custom";
 type CustomUnit = "day" | "week" | "month" | "year";
+type AuthMode = "login" | "signup" | "forgot";
 
 type CustomRule = {
   interval: number;
@@ -163,6 +167,14 @@ export function App() {
   const [viewMode, setViewMode] = useState<"day" | "week">("day");
   const [sectionMode, setSectionMode] = useState<"checklist" | "categories">("checklist");
   const [syncState, setSyncState] = useState("local");
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [currentUserEmail, setCurrentUserEmail] = useState("");
+  const [isAnonymousUser, setIsAnonymousUser] = useState(true);
 
   useEffect(() => {
     localStorage.setItem("rota_items", JSON.stringify(items));
@@ -176,50 +188,134 @@ export function App() {
     localStorage.setItem("rota_completions", JSON.stringify(completions));
   }, [completions]);
 
+  async function ensureCloudSession() {
+    if (!supabase) return null;
+    const { data: sessionData } = await supabase.auth.getSession();
+    let session = sessionData.session;
+    if (!session) {
+      const { data, error } = await supabase.auth.signInAnonymously();
+      if (error) {
+        setSyncState("local");
+        return null;
+      }
+      session = data.session;
+    }
+    applySessionState(session);
+    return session;
+  }
+
+  async function loadCloudData(options: { mergeLocal?: boolean } = {}) {
+    if (!supabase) return;
+    const session = await ensureCloudSession();
+    if (!session) return;
+
+    const [itemsResponse, completionsResponse, categoriesResponse] = await Promise.all([
+      supabase.from("route_items").select("*").order("start_time"),
+      supabase.from("route_completions").select("*"),
+      supabase.from("route_categories").select("*").order("name"),
+    ]);
+
+    if (itemsResponse.error || completionsResponse.error) {
+      setSyncState("local");
+      return;
+    }
+
+    let remoteItems = (itemsResponse.data ?? []).map(fromDbItem);
+    let remoteCompletions = fromDbCompletions(completionsResponse.data ?? []);
+    let remoteCategories = categoriesResponse.error ? [] : (categoriesResponse.data ?? []).map(fromDbCategory);
+
+    if (options.mergeLocal || remoteItems.length === 0) {
+      const merged = await mergeLocalIntoCloud(remoteItems, remoteCategories, remoteCompletions);
+      remoteItems = merged.items;
+      remoteCategories = merged.categories;
+      remoteCompletions = merged.completions;
+    }
+
+    if (remoteItems.length > 0) {
+      setItems(remoteItems);
+    }
+    setCompletions(remoteCompletions);
+
+    if (!categoriesResponse.error && remoteCategories.length > 0) {
+      setCategories(remoteCategories);
+    }
+
+    setSyncState("supabase");
+  }
+
+  async function mergeLocalIntoCloud(remoteItems: RouteItem[], remoteCategories: RouteCategory[], remoteCompletions: CompletionMap) {
+    if (!supabase) {
+      return { items: remoteItems, categories: remoteCategories, completions: remoteCompletions };
+    }
+
+    const nextCategories = [...remoteCategories];
+    const knownCategories = new Set(nextCategories.map((category) => categoryKey(category.name)));
+    const categoriesToInsert = categories
+      .filter((category) => !knownCategories.has(categoryKey(category.name)))
+      .map((category) => ({ ...category, id: crypto.randomUUID() }));
+
+    if (categoriesToInsert.length) {
+      const { error } = await supabase.from("route_categories").insert(categoriesToInsert.map(toDbCategory));
+      if (!error) {
+        nextCategories.push(...categoriesToInsert);
+      }
+    }
+
+    const nextItems = [...remoteItems];
+    const remoteByKey = new Map(nextItems.map((item) => [itemMergeKey(item), item]));
+    const itemIdMap = new Map<string, string>();
+    const itemsToInsert: RouteItem[] = [];
+
+    items.forEach((item) => {
+      const match = remoteByKey.get(itemMergeKey(item));
+      if (match) {
+        itemIdMap.set(item.id, match.id);
+        return;
+      }
+      const copy = { ...item, id: crypto.randomUUID() };
+      itemIdMap.set(item.id, copy.id);
+      itemsToInsert.push(copy);
+      nextItems.push(copy);
+      remoteByKey.set(itemMergeKey(copy), copy);
+    });
+
+    if (itemsToInsert.length) {
+      const { error } = await supabase.from("route_items").insert(itemsToInsert.map(toDbItem));
+      if (error) {
+        setSyncState("local");
+      }
+    }
+
+    const nextCompletions: CompletionMap = { ...remoteCompletions };
+    const completionRows = Object.entries(completions).flatMap(([oldItemId, days]) => {
+      const itemId = itemIdMap.get(oldItemId);
+      if (!itemId) return [];
+      return Object.entries(days).map(([completedOn, completed]) => {
+        nextCompletions[itemId] = { ...nextCompletions[itemId], [completedOn]: completed };
+        return { item_id: itemId, completed_on: completedOn, completed };
+      });
+    });
+
+    if (completionRows.length) {
+      await supabase.from("route_completions").upsert(completionRows, { onConflict: "item_id,completed_on" });
+    }
+
+    return {
+      items: nextItems.sort((a, b) => a.startTime.localeCompare(b.startTime)),
+      categories: nextCategories.sort((a, b) => a.name.localeCompare(b.name)),
+      completions: nextCompletions,
+    };
+  }
+
   useEffect(() => {
     let cancelled = false;
 
-    async function loadCloudData() {
-      if (!supabase) return;
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!sessionData.session) {
-        await supabase.auth.signInAnonymously();
-      }
-
-      const [itemsResponse, completionsResponse, categoriesResponse] = await Promise.all([
-        supabase.from("route_items").select("*").order("start_time"),
-        supabase.from("route_completions").select("*"),
-        supabase.from("route_categories").select("*").order("name"),
-      ]);
-
+    async function boot() {
+      await loadCloudData();
       if (cancelled) return;
-      if (itemsResponse.error || completionsResponse.error) {
-        setSyncState("local");
-        return;
-      }
-
-      const remoteItems = (itemsResponse.data ?? []).map(fromDbItem);
-      const remoteCompletions = fromDbCompletions(completionsResponse.data ?? []);
-      if (remoteItems.length > 0) {
-        setItems(remoteItems);
-      }
-      setCompletions(remoteCompletions);
-
-      if (!categoriesResponse.error) {
-        const remoteCategories = (categoriesResponse.data ?? []).map(fromDbCategory);
-        if (remoteCategories.length > 0) {
-          setCategories(remoteCategories);
-        } else {
-          const seededCategories = defaultCategories.map((category) => ({ ...category, id: crypto.randomUUID() }));
-          setCategories(seededCategories);
-          await supabase.from("route_categories").insert(seededCategories.map(toDbCategory));
-        }
-      }
-
-      setSyncState("supabase");
     }
 
-    loadCloudData();
+    boot();
     return () => {
       cancelled = true;
     };
@@ -259,6 +355,77 @@ export function App() {
   function moveSelectedDate(direction: -1 | 1) {
     setSelectedDate((current) => addDays(current, direction * (viewMode === "week" ? 7 : 1)));
   }
+
+  function openAuth(mode: AuthMode) {
+    setAuthMode(mode);
+    setAuthMessage("");
+    setAuthPassword("");
+    setAuthOpen(true);
+  }
+
+  async function submitAuth(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!supabase) {
+      setAuthMessage("Supabase não está configurado.");
+      return;
+    }
+    setAuthLoading(true);
+    setAuthMessage("");
+
+    try {
+      if (authMode === "forgot") {
+        const { error } = await supabase.auth.resetPasswordForEmail(authEmail, {
+          redirectTo: window.location.origin,
+        });
+        if (error) throw error;
+        setAuthMessage("Enviamos o link de recuperação para o seu e-mail.");
+        return;
+      }
+
+      if (authMode === "login") {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: authEmail,
+          password: authPassword,
+        });
+        if (error) throw error;
+        applySessionState(data.session);
+        await loadCloudData({ mergeLocal: true });
+        setAuthOpen(false);
+        return;
+      }
+
+      const session = await ensureCloudSession();
+      const anonymous = isAnonymousSession(session);
+      const result = anonymous
+        ? await supabase.auth.updateUser({ email: authEmail, password: authPassword })
+        : await supabase.auth.signUp({ email: authEmail, password: authPassword });
+
+      if (result.error) throw result.error;
+      const { data } = await supabase.auth.getSession();
+      applySessionState(data.session);
+      await loadCloudData({ mergeLocal: true });
+      setAuthMessage("Cadastro criado. Se for solicitado, confirme seu e-mail.");
+      setAuthOpen(false);
+    } catch (error) {
+      setAuthMessage(error instanceof Error ? error.message : "Não foi possível concluir a autenticação.");
+    } finally {
+      setAuthLoading(false);
+    }
+  }
+
+  async function signOut() {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setCurrentUserEmail("");
+    setIsAnonymousUser(true);
+    await loadCloudData({ mergeLocal: true });
+  }
+
+  function applySessionState(session: Session | null) {
+    setCurrentUserEmail(session?.user.email ?? "");
+    setIsAnonymousUser(isAnonymousSession(session));
+  }
+
   const categoryCounts = useMemo(
     () =>
       items.reduce<Record<string, number>>((acc, item) => {
@@ -455,6 +622,15 @@ export function App() {
           <img className="app-logo" src="/rota-do-dia-logo.png" alt="Rota do dia" />
         </div>
         <div className="top-actions">
+          <button className="ghost-button account-button" type="button" onClick={() => openAuth("login")}>
+            <UserRound size={18} />
+            {currentUserEmail || "Entrar / cadastrar"}
+          </button>
+          {currentUserEmail && !isAnonymousUser && (
+            <button className="icon-button account-logout" type="button" onClick={signOut} aria-label="sair da conta">
+              <LogOut size={18} />
+            </button>
+          )}
           <button
             className="primary-button add-item-button"
             type="button"
@@ -704,6 +880,68 @@ export function App() {
           </div>
         )}
       </section>
+
+      {authOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <section className="auth-card">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Conta</p>
+                <h2>{authMode === "forgot" ? "Recuperar senha" : authMode === "signup" ? "Criar cadastro" : "Entrar"}</h2>
+              </div>
+              <button className="icon-button" type="button" onClick={() => setAuthOpen(false)} aria-label="fechar">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="segmented-control auth-tabs" aria-label="alternar acesso">
+              <button className={authMode === "login" ? "active" : ""} type="button" onClick={() => openAuth("login")}>
+                Login
+              </button>
+              <button className={authMode === "signup" ? "active" : ""} type="button" onClick={() => openAuth("signup")}>
+                Cadastro
+              </button>
+            </div>
+
+            <form className="auth-form" onSubmit={submitAuth}>
+              <label>
+                E-mail
+                <input
+                  type="email"
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                  placeholder="seuemail@exemplo.com"
+                  required
+                />
+              </label>
+
+              {authMode !== "forgot" && (
+                <label>
+                  Senha
+                  <input
+                    type="password"
+                    value={authPassword}
+                    onChange={(event) => setAuthPassword(event.target.value)}
+                    placeholder="mínimo de 6 caracteres"
+                    minLength={6}
+                    required
+                  />
+                </label>
+              )}
+
+              {authMessage && <p className="auth-message">{authMessage}</p>}
+
+              <button className="primary-button" type="submit" disabled={authLoading}>
+                {authLoading ? "Aguarde..." : authMode === "forgot" ? "Enviar link" : authMode === "signup" ? "Cadastrar" : "Entrar"}
+              </button>
+            </form>
+
+            <button className="link-button" type="button" onClick={() => openAuth(authMode === "forgot" ? "login" : "forgot")}>
+              {authMode === "forgot" ? "Voltar ao login" : "Esqueceu sua senha?"}
+            </button>
+          </section>
+        </div>
+      )}
 
       {itemModalOpen && (
         <div className="modal-backdrop" role="dialog" aria-modal="true">
@@ -1115,6 +1353,14 @@ function categoryKey(value: string) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
+}
+
+function itemMergeKey(item: RouteItem) {
+  return [categoryKey(item.title), item.startsOn, item.startTime, item.endTime].join("|");
+}
+
+function isAnonymousSession(session: Session | null) {
+  return Boolean(!session?.user.email || (session.user as { is_anonymous?: boolean }).is_anonymous);
 }
 
 function formatTaskCount(count: number) {
