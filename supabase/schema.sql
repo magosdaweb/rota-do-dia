@@ -40,9 +40,29 @@ create table if not exists public.route_completions (
   unique (item_id, completed_on)
 );
 
+create table if not exists public.resume_cards (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null default auth.uid(),
+  company text not null,
+  business_area text not null default '',
+  desired_role text not null default '',
+  url text not null default '',
+  city text not null default '',
+  job_link text not null default '',
+  whatsapp text not null default '',
+  phone text not null default '',
+  email text not null default '',
+  recruiter_name text not null default '',
+  stage text not null default 'send',
+  result text not null default 'waiting',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 alter table public.route_items enable row level security;
 alter table public.route_categories enable row level security;
 alter table public.route_completions enable row level security;
+alter table public.resume_cards enable row level security;
 
 drop policy if exists "route_items_select_own" on public.route_items;
 create policy "route_items_select_own"
@@ -116,5 +136,30 @@ with check (auth.uid() = user_id);
 drop policy if exists "route_completions_delete_own" on public.route_completions;
 create policy "route_completions_delete_own"
 on public.route_completions for delete
+to authenticated
+using (auth.uid() = user_id);
+
+drop policy if exists "resume_cards_select_own" on public.resume_cards;
+create policy "resume_cards_select_own"
+on public.resume_cards for select
+to authenticated
+using (auth.uid() = user_id);
+
+drop policy if exists "resume_cards_insert_own" on public.resume_cards;
+create policy "resume_cards_insert_own"
+on public.resume_cards for insert
+to authenticated
+with check (auth.uid() = user_id);
+
+drop policy if exists "resume_cards_update_own" on public.resume_cards;
+create policy "resume_cards_update_own"
+on public.resume_cards for update
+to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
+
+drop policy if exists "resume_cards_delete_own" on public.resume_cards;
+create policy "resume_cards_delete_own"
+on public.resume_cards for delete
 to authenticated
 using (auth.uid() = user_id);

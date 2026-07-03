@@ -22,6 +22,9 @@ import { supabase } from "./lib/supabase";
 type RepeatType = "none" | "daily" | "weekly" | "weekdays" | "monthly" | "yearly" | "custom";
 type CustomUnit = "day" | "week" | "month" | "year";
 type AuthMode = "login" | "signup" | "forgot";
+type AppView = "checklist" | "crm";
+type ResumeStage = "send" | "sent" | "followup" | "interview_scheduled" | "interview_done";
+type ResumeResult = "hired" | "rejected" | "waiting";
 
 type CustomRule = {
   interval: number;
@@ -80,9 +83,53 @@ type DbCategory = {
   active: boolean;
 };
 
+type DbResumeCard = {
+  id: string;
+  company: string;
+  business_area: string;
+  desired_role: string;
+  url: string;
+  city: string;
+  job_link: string;
+  whatsapp: string;
+  phone: string;
+  email: string;
+  recruiter_name: string;
+  stage: ResumeStage;
+  result: ResumeResult;
+};
+
+type ResumeCard = {
+  id: string;
+  company: string;
+  businessArea: string;
+  desiredRole: string;
+  url: string;
+  city: string;
+  jobLink: string;
+  whatsapp: string;
+  phone: string;
+  email: string;
+  recruiterName: string;
+  stage: ResumeStage;
+  result: ResumeResult;
+};
+
 const weekLabels = ["D", "S", "T", "Q", "Q", "S", "S"];
 const fullWeekLabels = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
 const donutColors = ["#7c3aed", "#a855f7", "#c084fc", "#8b5cf6", "#d8b4fe", "#6d28d9"];
+const resumeStages: Array<{ id: ResumeStage; label: string }> = [
+  { id: "send", label: "Enviar" },
+  { id: "sent", label: "Enviado" },
+  { id: "followup", label: "Follow-up" },
+  { id: "interview_scheduled", label: "Entrevista marcada" },
+  { id: "interview_done", label: "Entrevista feita" },
+];
+const resumeResults: Array<{ id: ResumeResult; icon: string; label: string }> = [
+  { id: "hired", icon: "👍", label: "Contratado" },
+  { id: "rejected", icon: "👎", label: "Recusado" },
+  { id: "waiting", icon: "⏳", label: "Aguardando retorno" },
+];
 const today = toDateInput(new Date());
 
 const defaultRule: CustomRule = {
@@ -151,11 +198,29 @@ const emptyForm = {
   repeatType: "none" as RepeatType,
 };
 
+const emptyResumeForm: Omit<ResumeCard, "id"> = {
+  company: "",
+  businessArea: "",
+  desiredRole: "",
+  url: "",
+  city: "",
+  jobLink: "",
+  whatsapp: "",
+  phone: "",
+  email: "",
+  recruiterName: "",
+  stage: "send",
+  result: "waiting",
+};
+
 export function App() {
   const [items, setItems] = useState<RouteItem[]>(() => readLocal("rota_items", initialItems).map(withItemDefaults));
   const [categories, setCategories] = useState<RouteCategory[]>(() => readLocal("rota_categories", defaultCategories));
   const [completions, setCompletions] = useState<CompletionMap>(() => readLocal("rota_completions", {}));
+  const [resumeCards, setResumeCards] = useState<ResumeCard[]>(() => readLocal("rota_resume_cards", []));
   const [form, setForm] = useState(emptyForm);
+  const [resumeForm, setResumeForm] = useState(emptyResumeForm);
+  const [appView, setAppView] = useState<AppView>("checklist");
   const [newCategory, setNewCategory] = useState("");
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editingCategoryName, setEditingCategoryName] = useState("");
@@ -163,6 +228,9 @@ export function App() {
   const [customOpen, setCustomOpen] = useState(false);
   const [itemModalOpen, setItemModalOpen] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [resumeModalOpen, setResumeModalOpen] = useState(false);
+  const [editingResumeId, setEditingResumeId] = useState<string | null>(null);
+  const [draggingResumeId, setDraggingResumeId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(today);
   const [viewMode, setViewMode] = useState<"day" | "week">("day");
   const [sectionMode, setSectionMode] = useState<"checklist" | "categories">("checklist");
@@ -187,6 +255,10 @@ export function App() {
   useEffect(() => {
     localStorage.setItem("rota_completions", JSON.stringify(completions));
   }, [completions]);
+
+  useEffect(() => {
+    localStorage.setItem("rota_resume_cards", JSON.stringify(resumeCards));
+  }, [resumeCards]);
 
   async function ensureCloudSession() {
     if (!supabase) return null;
@@ -240,7 +312,33 @@ export function App() {
       setCategories(remoteCategories);
     }
 
+    await loadResumeCloudData(options.mergeLocal);
     setSyncState("supabase");
+  }
+
+  async function loadResumeCloudData(mergeLocal = false) {
+    if (!supabase) return;
+    const resumeResponse = await supabase.from("resume_cards").select("*").order("created_at");
+    if (resumeResponse.error) return;
+
+    let remoteResumeCards = (resumeResponse.data ?? []).map(fromDbResumeCard);
+    if (mergeLocal || remoteResumeCards.length === 0) {
+      const remoteByKey = new Map(remoteResumeCards.map((card) => [resumeMergeKey(card), card]));
+      const cardsToInsert = resumeCards
+        .filter((card) => !remoteByKey.has(resumeMergeKey(card)))
+        .map((card) => ({ ...card, id: crypto.randomUUID() }));
+
+      if (cardsToInsert.length) {
+        const { error } = await supabase.from("resume_cards").insert(cardsToInsert.map(toDbResumeCard));
+        if (!error) {
+          remoteResumeCards = [...remoteResumeCards, ...cardsToInsert];
+        }
+      }
+    }
+
+    if (remoteResumeCards.length > 0 || mergeLocal) {
+      setResumeCards(remoteResumeCards);
+    }
   }
 
   async function mergeLocalIntoCloud(remoteItems: RouteItem[], remoteCategories: RouteCategory[], remoteCompletions: CompletionMap) {
@@ -350,6 +448,14 @@ export function App() {
   const activeCategories = useMemo(
     () => categories.filter((category) => category.active).sort((a, b) => a.name.localeCompare(b.name)),
     [categories],
+  );
+  const resumeColumns = useMemo(
+    () =>
+      resumeStages.map((stage) => ({
+        ...stage,
+        cards: resumeCards.filter((card) => card.stage === stage.id),
+      })),
+    [resumeCards],
   );
 
   function moveSelectedDate(direction: -1 | 1) {
@@ -461,6 +567,93 @@ export function App() {
   function closeItemModal() {
     setEditingItemId(null);
     setItemModalOpen(false);
+  }
+
+  function openNewResumeModal(stage: ResumeStage = "send") {
+    setEditingResumeId(null);
+    setResumeForm({ ...emptyResumeForm, stage });
+    setResumeModalOpen(true);
+  }
+
+  function openEditResumeModal(card: ResumeCard) {
+    setEditingResumeId(card.id);
+    setResumeForm({
+      company: card.company,
+      businessArea: card.businessArea,
+      desiredRole: card.desiredRole,
+      url: card.url,
+      city: card.city,
+      jobLink: card.jobLink,
+      whatsapp: card.whatsapp,
+      phone: card.phone,
+      email: card.email,
+      recruiterName: card.recruiterName,
+      stage: card.stage,
+      result: card.result,
+    });
+    setResumeModalOpen(true);
+  }
+
+  function closeResumeModal() {
+    setEditingResumeId(null);
+    setResumeModalOpen(false);
+  }
+
+  async function saveResumeCard(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!resumeForm.company.trim()) return;
+
+    const nextCard: ResumeCard = {
+      ...resumeForm,
+      id: editingResumeId ?? crypto.randomUUID(),
+      company: resumeForm.company.trim(),
+      businessArea: resumeForm.businessArea.trim(),
+      desiredRole: resumeForm.desiredRole.trim(),
+      url: resumeForm.url.trim(),
+      city: resumeForm.city.trim(),
+      jobLink: resumeForm.jobLink.trim(),
+      whatsapp: resumeForm.whatsapp.trim(),
+      phone: resumeForm.phone.trim(),
+      email: resumeForm.email.trim(),
+      recruiterName: resumeForm.recruiterName.trim(),
+    };
+
+    setResumeCards((current) =>
+      editingResumeId ? current.map((card) => (card.id === editingResumeId ? nextCard : card)) : [...current, nextCard],
+    );
+    closeResumeModal();
+
+    if (supabase) {
+      const query = editingResumeId
+        ? supabase.from("resume_cards").update(toDbResumeCard(nextCard)).eq("id", editingResumeId)
+        : supabase.from("resume_cards").insert(toDbResumeCard(nextCard));
+      const { error } = await query;
+      setSyncState(error ? "local" : "supabase");
+    }
+  }
+
+  async function removeResumeCard(cardId: string) {
+    setResumeCards((current) => current.filter((card) => card.id !== cardId));
+    if (supabase) {
+      const { error } = await supabase.from("resume_cards").delete().eq("id", cardId);
+      setSyncState(error ? "local" : "supabase");
+    }
+  }
+
+  async function moveResumeCard(cardId: string, stage: ResumeStage) {
+    setResumeCards((current) => current.map((card) => (card.id === cardId ? { ...card, stage } : card)));
+    if (supabase) {
+      const { error } = await supabase.from("resume_cards").update({ stage }).eq("id", cardId);
+      setSyncState(error ? "local" : "supabase");
+    }
+  }
+
+  function handleResumeDrop(event: React.DragEvent<HTMLElement>, stage: ResumeStage) {
+    event.preventDefault();
+    if (draggingResumeId) {
+      moveResumeCard(draggingResumeId, stage);
+      setDraggingResumeId(null);
+    }
   }
 
   async function saveItem(event: FormEvent<HTMLFormElement>) {
@@ -706,17 +899,39 @@ export function App() {
               <LogOut size={18} />
             </button>
           )}
-          <button
-            className="primary-button add-item-button"
-            type="button"
-            onClick={openNewItemModal}
-          >
-            <Plus size={18} />
-            Cadastrar item
-          </button>
+          {appView === "checklist" ? (
+            <button
+              className="primary-button add-item-button"
+              type="button"
+              onClick={openNewItemModal}
+            >
+              <Plus size={18} />
+              Cadastrar item
+            </button>
+          ) : (
+            <button
+              className="primary-button add-item-button"
+              type="button"
+              onClick={() => openNewResumeModal()}
+            >
+              <Plus size={18} />
+              Cadastrar currículo
+            </button>
+          )}
         </div>
       </section>
 
+      <nav className="app-menu segmented-control" aria-label="menu principal">
+        <button className={appView === "checklist" ? "active" : ""} type="button" onClick={() => setAppView("checklist")}>
+          Checklist do dia
+        </button>
+        <button className={appView === "crm" ? "active" : ""} type="button" onClick={() => setAppView("crm")}>
+          CRM de currículos
+        </button>
+      </nav>
+
+      {appView === "checklist" ? (
+        <>
       <section className="dashboard-grid">
         <article className="panel progress-panel">
           <div className="panel-heading">
@@ -955,6 +1170,86 @@ export function App() {
           </div>
         )}
       </section>
+        </>
+      ) : (
+        <section className="crm-section">
+          <div className="route-toolbar">
+            <div>
+              <p className="eyebrow">CRM de currículos</p>
+              <h2>Funil de candidaturas</h2>
+            </div>
+            <span className="crm-total">{resumeCards.length} {resumeCards.length === 1 ? "card" : "cards"}</span>
+          </div>
+
+          <div className="crm-board" aria-label="kanban de currículos">
+            {resumeColumns.map((column) => (
+              <section
+                className={`crm-column ${draggingResumeId ? "dragging" : ""}`}
+                key={column.id}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => handleResumeDrop(event, column.id)}
+              >
+                <header className="crm-column-header">
+                  <h3>{column.label}</h3>
+                  <span>{column.cards.length}</span>
+                </header>
+
+                <div className="crm-card-list">
+                  {column.cards.map((card) => {
+                    const result = resumeResults.find((item) => item.id === card.result) ?? resumeResults[2];
+
+                    return (
+                      <article
+                        className="resume-card"
+                        draggable
+                        key={card.id}
+                        onDragEnd={() => setDraggingResumeId(null)}
+                        onDragStart={() => setDraggingResumeId(card.id)}
+                      >
+                        <div className="resume-card-heading">
+                          <div>
+                            <h3>{card.company}</h3>
+                            <p>{card.desiredRole || "Cargo não informado"}</p>
+                          </div>
+                          <div className="item-actions">
+                            <button className="icon-button" type="button" onClick={() => openEditResumeModal(card)} aria-label="editar currículo">
+                              <Pencil size={18} />
+                            </button>
+                            <button className="icon-button" type="button" onClick={() => removeResumeCard(card.id)} aria-label="remover currículo">
+                              <Trash2 size={18} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {card.stage === "interview_done" && (
+                          <p className="resume-result">Resultado: <span>{result.icon} {result.label}</span></p>
+                        )}
+
+                        <dl className="resume-details">
+                          <div><dt>Área</dt><dd>{card.businessArea || "-"}</dd></div>
+                          <div><dt>Cidade</dt><dd>{card.city || "-"}</dd></div>
+                          <div><dt>Nome do contratante</dt><dd>{card.recruiterName || "-"}</dd></div>
+                          <div><dt>WhatsApp</dt><dd>{card.whatsapp || "-"}</dd></div>
+                          <div><dt>Telefone</dt><dd>{card.phone || "-"}</dd></div>
+                          <div><dt>E-mail</dt><dd>{card.email || "-"}</dd></div>
+                          <div><dt>URL</dt><dd>{card.url ? <a href={card.url} target="_blank" rel="noreferrer">Abrir</a> : "-"}</dd></div>
+                          <div><dt>Link da vaga</dt><dd>{card.jobLink ? <a href={card.jobLink} target="_blank" rel="noreferrer">Abrir vaga</a> : "-"}</dd></div>
+                        </dl>
+                      </article>
+                    );
+                  })}
+
+                  {!column.cards.length && (
+                    <button className="crm-empty" type="button" onClick={() => openNewResumeModal(column.id)}>
+                      Adicionar em {column.label}
+                    </button>
+                  )}
+                </div>
+              </section>
+            ))}
+          </div>
+        </section>
+      )}
 
       {authOpen && (
         <div className="modal-backdrop" role="dialog" aria-modal="true">
@@ -1056,6 +1351,159 @@ export function App() {
               <button className="primary-button" type="submit">
                 <Plus size={18} />
                 {editingItemId ? "Salvar" : "Adicionar"}
+              </button>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {resumeModalOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <section className="item-modal resume-modal">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">CRM de currículos</p>
+                <h2>{editingResumeId ? "Editar card" : "Novo card"}</h2>
+              </div>
+              <button className="icon-button" type="button" onClick={closeResumeModal} aria-label="fechar">
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={saveResumeCard} className="item-form">
+              <div className="form-row">
+                <label>
+                  Empresa
+                  <input
+                    value={resumeForm.company}
+                    onChange={(event) => setResumeForm({ ...resumeForm, company: event.target.value })}
+                    placeholder="Nome da empresa"
+                    required
+                  />
+                </label>
+                <label>
+                  Área de atuação
+                  <input
+                    value={resumeForm.businessArea}
+                    onChange={(event) => setResumeForm({ ...resumeForm, businessArea: event.target.value })}
+                    placeholder="Ex.: tecnologia, vendas"
+                  />
+                </label>
+              </div>
+
+              <div className="form-row">
+                <label>
+                  Cargo desejado
+                  <input
+                    value={resumeForm.desiredRole}
+                    onChange={(event) => setResumeForm({ ...resumeForm, desiredRole: event.target.value })}
+                    placeholder="Ex.: SDR, assistente"
+                  />
+                </label>
+                <label>
+                  Cidade
+                  <input
+                    value={resumeForm.city}
+                    onChange={(event) => setResumeForm({ ...resumeForm, city: event.target.value })}
+                    placeholder="Cidade"
+                  />
+                </label>
+              </div>
+
+              <div className="form-row">
+                <label>
+                  URL
+                  <input
+                    type="url"
+                    value={resumeForm.url}
+                    onChange={(event) => setResumeForm({ ...resumeForm, url: event.target.value })}
+                    placeholder="https://empresa.com"
+                  />
+                </label>
+                <label>
+                  Link da vaga
+                  <input
+                    type="url"
+                    value={resumeForm.jobLink}
+                    onChange={(event) => setResumeForm({ ...resumeForm, jobLink: event.target.value })}
+                    placeholder="https://..."
+                  />
+                </label>
+              </div>
+
+              <div className="form-row">
+                <label>
+                  WhatsApp
+                  <input
+                    value={resumeForm.whatsapp}
+                    onChange={(event) => setResumeForm({ ...resumeForm, whatsapp: event.target.value })}
+                    placeholder="(00) 00000-0000"
+                  />
+                </label>
+                <label>
+                  Telefone
+                  <input
+                    value={resumeForm.phone}
+                    onChange={(event) => setResumeForm({ ...resumeForm, phone: event.target.value })}
+                    placeholder="(00) 0000-0000"
+                  />
+                </label>
+              </div>
+
+              <div className="form-row">
+                <label>
+                  E-mail
+                  <input
+                    type="email"
+                    value={resumeForm.email}
+                    onChange={(event) => setResumeForm({ ...resumeForm, email: event.target.value })}
+                    placeholder="contato@empresa.com"
+                  />
+                </label>
+                <label>
+                  Nome do contratante
+                  <input
+                    value={resumeForm.recruiterName}
+                    onChange={(event) => setResumeForm({ ...resumeForm, recruiterName: event.target.value })}
+                    placeholder="Nome da pessoa"
+                  />
+                </label>
+              </div>
+
+              <div className="form-row">
+                <label>
+                  Etapa
+                  <div className="select-wrap">
+                    <select value={resumeForm.stage} onChange={(event) => setResumeForm({ ...resumeForm, stage: event.target.value as ResumeStage })}>
+                      {resumeStages.map((stage) => (
+                        <option key={stage.id} value={stage.id}>
+                          {stage.label}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown />
+                  </div>
+                </label>
+                {resumeForm.stage === "interview_done" && (
+                  <label>
+                    Resultado
+                    <div className="select-wrap">
+                      <select value={resumeForm.result} onChange={(event) => setResumeForm({ ...resumeForm, result: event.target.value as ResumeResult })}>
+                        {resumeResults.map((result) => (
+                          <option key={result.id} value={result.id}>
+                            {result.icon} {result.label}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown />
+                    </div>
+                  </label>
+                )}
+              </div>
+
+              <button className="primary-button" type="submit">
+                <Plus size={18} />
+                {editingResumeId ? "Salvar" : "Adicionar"}
               </button>
             </form>
           </section>
@@ -1378,6 +1826,10 @@ function itemMergeKey(item: RouteItem) {
   return [categoryKey(item.title), item.startsOn, item.startTime, item.endTime].join("|");
 }
 
+function resumeMergeKey(card: ResumeCard) {
+  return [categoryKey(card.company), categoryKey(card.desiredRole), categoryKey(card.jobLink)].join("|");
+}
+
 function isAnonymousSession(session: Session | null) {
   return Boolean(!session?.user.email || (session.user as { is_anonymous?: boolean }).is_anonymous);
 }
@@ -1437,6 +1889,42 @@ function fromDbCategory(category: DbCategory): RouteCategory {
     name: category.name,
     color: category.color,
     active: category.active,
+  };
+}
+
+function toDbResumeCard(card: ResumeCard) {
+  return {
+    id: card.id,
+    company: card.company,
+    business_area: card.businessArea,
+    desired_role: card.desiredRole,
+    url: card.url,
+    city: card.city,
+    job_link: card.jobLink,
+    whatsapp: card.whatsapp,
+    phone: card.phone,
+    email: card.email,
+    recruiter_name: card.recruiterName,
+    stage: card.stage,
+    result: card.result,
+  };
+}
+
+function fromDbResumeCard(card: DbResumeCard): ResumeCard {
+  return {
+    id: card.id,
+    company: card.company,
+    businessArea: card.business_area,
+    desiredRole: card.desired_role,
+    url: card.url,
+    city: card.city,
+    jobLink: card.job_link,
+    whatsapp: card.whatsapp,
+    phone: card.phone,
+    email: card.email,
+    recruiterName: card.recruiter_name,
+    stage: card.stage,
+    result: card.result,
   };
 }
 

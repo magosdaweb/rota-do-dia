@@ -135,6 +135,15 @@ h3 {
   border: 1px solid #d8c5ff;
 }
 
+.app-menu {
+  width: fit-content;
+  margin: 0 0 16px;
+}
+
+.app-menu button {
+  min-width: 160px;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.95fr);
@@ -142,7 +151,8 @@ h3 {
 }
 
 .panel,
-.route-section {
+.route-section,
+.crm-section {
   border: 1px solid #eadcff;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.92);
@@ -398,6 +408,15 @@ textarea {
 .route-section {
   margin-top: 16px;
   padding: 22px;
+}
+
+.crm-section {
+  padding: 22px;
+}
+
+.crm-total {
+  color: #6d28d9;
+  font-weight: 600;
 }
 
 .route-toolbar input {
@@ -718,6 +737,125 @@ textarea {
   padding: 8px 2px;
 }
 
+.crm-board {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(240px, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+
+.crm-column {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 520px;
+  border: 1px solid #eadcff;
+  border-radius: 8px;
+  background: #fbf9ff;
+}
+
+.crm-column.dragging {
+  border-color: #c4b5fd;
+}
+
+.crm-column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #eadcff;
+  padding: 14px;
+  background: #ffffff;
+}
+
+.crm-column-header span {
+  display: grid;
+  min-width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 999px;
+  background: #f3edff;
+  color: #6d28d9;
+  font-weight: 600;
+}
+
+.crm-card-list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 10px;
+}
+
+.resume-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #d8c5ff;
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+  cursor: grab;
+}
+
+.resume-card:active {
+  cursor: grabbing;
+}
+
+.resume-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.resume-card-heading p,
+.resume-result {
+  margin: 0;
+  color: #6f5e83;
+}
+
+.resume-result span {
+  color: #251838;
+  font-weight: 600;
+}
+
+.resume-details {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.resume-details div {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 8px;
+}
+
+.resume-details dt {
+  color: #7b7288;
+  font-size: 0.82rem;
+}
+
+.resume-details dd {
+  min-width: 0;
+  margin: 0;
+  color: #251838;
+  overflow-wrap: anywhere;
+}
+
+.resume-details a {
+  color: #6d28d9;
+  font-weight: 600;
+}
+
+.crm-empty {
+  min-height: 96px;
+  border: 1px dashed #d8c5ff;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #6d28d9;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -742,6 +880,10 @@ textarea {
 .item-modal {
   width: min(560px, 100%);
   background: #ffffff;
+}
+
+.item-modal.resume-modal {
+  width: min(760px, 100%);
 }
 
 .auth-card {
@@ -875,10 +1017,20 @@ textarea {
   }
 
   .topbar,
+  .app-menu,
   .route-toolbar,
   .panel-heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .app-menu {
+    display: grid;
+    width: 100%;
+  }
+
+  .app-menu button {
+    width: 100%;
   }
 
   .route-toolbar input,
@@ -901,6 +1053,22 @@ textarea {
   .route-controls {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .crm-board {
+    grid-template-columns: repeat(5, minmax(260px, 82vw));
+  }
+
+  .crm-column {
+    min-height: 420px;
+  }
+
+  .resume-card-heading {
+    display: grid;
+  }
+
+  .resume-details div {
+    grid-template-columns: 1fr;
   }
 
   .form-row,
