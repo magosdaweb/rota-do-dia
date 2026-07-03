@@ -94,7 +94,7 @@ h3 {
 
 .app-logo {
   display: block;
-  width: min(420px, 72vw);
+  width: min(210px, 36vw);
   height: auto;
 }
 
