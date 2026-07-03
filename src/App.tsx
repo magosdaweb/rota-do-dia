@@ -156,7 +156,10 @@ export function App() {
   const [customRule, setCustomRule] = useState<CustomRule>(defaultRule);
   const [customOpen, setCustomOpen] = useState(false);
   const [itemModalOpen, setItemModalOpen] = useState(false);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(today);
+  const [performanceStartDate, setPerformanceStartDate] = useState(today);
+  const [performanceEndDate, setPerformanceEndDate] = useState(today);
   const [viewMode, setViewMode] = useState<"day" | "week">("day");
   const [sectionMode, setSectionMode] = useState<"checklist" | "categories">("checklist");
   const [syncState, setSyncState] = useState("local");
@@ -231,18 +234,14 @@ export function App() {
   );
 
   const weekDays = useMemo(() => buildWeekDays(selectedDate), [selectedDate]);
-  const performanceDates = useMemo(
-    () => (viewMode === "week" ? weekDays : buildTrailingDays(selectedDate)),
-    [selectedDate, viewMode, weekDays],
+  const performanceRangeDates = useMemo(
+    () => buildDateRange(performanceStartDate, performanceEndDate),
+    [performanceStartDate, performanceEndDate],
   );
-  const performanceSummaryDates = useMemo(
-    () => (viewMode === "week" ? weekDays : [selectedDate]),
-    [selectedDate, viewMode, weekDays],
-  );
-  const performance = useMemo(() => buildPerformance(items, completions, performanceDates), [items, completions, performanceDates]);
+  const performance = useMemo(() => buildPerformance(items, completions, performanceRangeDates), [items, completions, performanceRangeDates]);
   const performanceSummary = useMemo(
-    () => buildPerformanceSummary(items, completions, performanceSummaryDates),
-    [items, completions, performanceSummaryDates],
+    () => buildPerformanceSummary(items, completions, performanceRangeDates),
+    [items, completions, performanceRangeDates],
   );
   const occupancy = useMemo(() => buildOccupancy(dayItems), [dayItems]);
   const totalMinutes = occupancy.reduce((sum, item) => sum + item.minutes, 0);
@@ -262,12 +261,40 @@ export function App() {
     [items],
   );
 
-  async function addItem(event: FormEvent<HTMLFormElement>) {
+  function openNewItemModal() {
+    setEditingItemId(null);
+    setCustomRule(defaultRule);
+    setForm((current) => ({ ...emptyForm, startsOn: selectedDate, category: current.category || activeCategories[0]?.name || "rotina" }));
+    setItemModalOpen(true);
+  }
+
+  function openEditItemModal(item: RouteItem) {
+    setEditingItemId(item.id);
+    setForm({
+      title: item.title,
+      description: item.description,
+      category: item.category,
+      startsOn: item.startsOn,
+      startTime: item.startTime,
+      endTime: item.endTime,
+      repeatType: item.repeatType,
+    });
+    setCustomRule(item.customRule);
+    setItemModalOpen(true);
+  }
+
+  function closeItemModal() {
+    setEditingItemId(null);
+    setItemModalOpen(false);
+  }
+
+  async function saveItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!form.title.trim()) return;
+    const currentItem = editingItemId ? items.find((item) => item.id === editingItemId) : null;
 
     const nextItem: RouteItem = {
-      id: crypto.randomUUID(),
+      id: editingItemId ?? crypto.randomUUID(),
       title: form.title.trim(),
       description: form.description.trim(),
       category: form.category || activeCategories[0]?.name || "rotina",
@@ -276,15 +303,18 @@ export function App() {
       endTime: form.endTime,
       repeatType: form.repeatType,
       customRule,
-      active: true,
+      active: currentItem?.active ?? true,
     };
 
-    setItems((current) => [...current, nextItem]);
+    setItems((current) => (editingItemId ? current.map((item) => (item.id === editingItemId ? nextItem : item)) : [...current, nextItem]));
     setForm({ ...emptyForm, startsOn: selectedDate, category: activeCategories[0]?.name || "rotina" });
-    setItemModalOpen(false);
+    closeItemModal();
 
     if (supabase) {
-      const { error } = await supabase.from("route_items").insert(toDbItem(nextItem));
+      const query = editingItemId
+        ? supabase.from("route_items").update(toDbItem(nextItem)).eq("id", editingItemId)
+        : supabase.from("route_items").insert(toDbItem(nextItem));
+      const { error } = await query;
       setSyncState(error ? "local" : "supabase");
     }
   }
@@ -410,6 +440,14 @@ export function App() {
     }
   }
 
+  function applyPerformancePreset(monthCount: number) {
+    const base = fromDateInput(selectedDate);
+    const start = new Date(base.getFullYear(), base.getMonth(), 1);
+    const end = new Date(base.getFullYear(), base.getMonth() + monthCount, 0);
+    setPerformanceStartDate(toDateInput(start));
+    setPerformanceEndDate(toDateInput(end));
+  }
+
   return (
     <main className="app-shell">
       <section className="topbar">
@@ -420,10 +458,7 @@ export function App() {
           <button
             className="primary-button add-item-button"
             type="button"
-            onClick={() => {
-              setForm((current) => ({ ...current, startsOn: selectedDate, category: current.category || activeCategories[0]?.name || "rotina" }));
-              setItemModalOpen(true);
-            }}
+            onClick={openNewItemModal}
           >
             <Plus size={18} />
             Cadastrar item
@@ -437,15 +472,37 @@ export function App() {
             <div>
               <p className="eyebrow">Performance</p>
               <h2>{performanceSummary.percent}% concluído</h2>
+              <p className="range-label">{formatRangeLabel(performanceStartDate, performanceEndDate)}</p>
             </div>
             <CheckCircle2 />
+          </div>
+          <div className="performance-range">
+            <label>
+              De
+              <input type="date" value={performanceStartDate} onChange={(event) => setPerformanceStartDate(event.target.value)} />
+            </label>
+            <label>
+              Até
+              <input type="date" value={performanceEndDate} onChange={(event) => setPerformanceEndDate(event.target.value)} />
+            </label>
+            <div className="range-presets">
+              <button type="button" onClick={() => applyPerformancePreset(1)}>
+                Mês
+              </button>
+              <button type="button" onClick={() => applyPerformancePreset(2)}>
+                Bimestre
+              </button>
+              <button type="button" onClick={() => applyPerformancePreset(3)}>
+                Trimestre
+              </button>
+            </div>
           </div>
           <div className="progress-ring" style={{ "--value": `${performanceSummary.percent * 3.6}deg` } as React.CSSProperties}>
             <span>{performanceSummary.done}/{performanceSummary.total}</span>
           </div>
-          <div className="mini-bars" aria-label="desempenho dos últimos sete dias">
+          <div className="mini-bars" aria-label="desempenho do período selecionado">
             {performance.map((item) => (
-              <div className="mini-bar" key={item.date}>
+              <div className="mini-bar" key={item.key}>
                 <span style={{ height: `${Math.max(item.percent, 6)}%` }} />
                 <small>{item.label}</small>
               </div>
@@ -605,9 +662,14 @@ export function App() {
                     {item.description && <p className="route-description">{item.description}</p>}
                     <p className="route-meta">{item.category} · {repeatLabel(item)}</p>
                   </div>
-                  <button className="icon-button" type="button" onClick={() => removeItem(item.id)} aria-label="remover">
-                    <Trash2 size={18} />
-                  </button>
+                  <div className="item-actions">
+                    <button className="icon-button" type="button" onClick={() => openEditItemModal(item)} aria-label="editar item">
+                      <Pencil size={18} />
+                    </button>
+                    <button className="icon-button" type="button" onClick={() => removeItem(item.id)} aria-label="remover">
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
                 </article>
               );
             })}
@@ -662,14 +724,14 @@ export function App() {
           <section className="item-modal">
             <div className="modal-heading">
               <div>
-                <p className="eyebrow">Novo item</p>
-                <h2>Adicionar tarefa</h2>
+                <p className="eyebrow">{editingItemId ? "Editar item" : "Novo item"}</p>
+                <h2>{editingItemId ? "Editar tarefa" : "Adicionar tarefa"}</h2>
               </div>
-              <button className="icon-button" type="button" onClick={() => setItemModalOpen(false)} aria-label="fechar">
+              <button className="icon-button" type="button" onClick={closeItemModal} aria-label="fechar">
                 <X size={18} />
               </button>
             </div>
-            <form onSubmit={addItem} className="item-form">
+            <form onSubmit={saveItem} className="item-form">
               <label>
                 Título
                 <input
@@ -750,7 +812,7 @@ export function App() {
               )}
               <button className="primary-button" type="submit">
                 <Plus size={18} />
-                Adicionar
+                {editingItemId ? "Salvar" : "Adicionar"}
               </button>
             </form>
           </section>
@@ -906,6 +968,18 @@ function buildTrailingDays(value: string) {
   return Array.from({ length: 7 }, (_, index) => addDays(value, index - 6));
 }
 
+function buildDateRange(startValue: string, endValue: string) {
+  const [start, end] = normalizeRange(startValue, endValue);
+  const totalDays = Math.min(daysBetween(start, end), 365) + 1;
+  return Array.from({ length: totalDays }, (_, index) => addDays(start, index));
+}
+
+function normalizeRange(startValue: string, endValue: string) {
+  const start = startValue || today;
+  const end = endValue || start;
+  return start <= end ? [start, end] : [end, start];
+}
+
 function formatWeekRange(days: string[]) {
   if (!days.length) return "";
   const first = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" }).format(fromDateInput(days[0]));
@@ -923,6 +997,12 @@ function formatDateLabel(value: string) {
     day: "2-digit",
     month: "long",
   }).format(fromDateInput(value));
+}
+
+function formatRangeLabel(startValue: string, endValue: string) {
+  const [start, end] = normalizeRange(startValue, endValue);
+  const formatter = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+  return `${formatter.format(fromDateInput(start))} - ${formatter.format(fromDateInput(end))}`;
 }
 
 function formatMinutes(minutes: number) {
@@ -988,16 +1068,29 @@ function occursOn(item: RouteItem, dateValue: string) {
 }
 
 function buildPerformance(items: RouteItem[], completions: CompletionMap, dates: string[]) {
-  return dates.map((date) => {
-    const due = items.filter((item) => occursOn(item, date));
-    const done = due.filter((item) => completions[item.id]?.[date]).length;
-    const percent = due.length ? Math.round((done / due.length) * 100) : 0;
+  const bucketSize = dates.length <= 14 ? 1 : dates.length <= 70 ? 7 : 30;
+  const buckets = [];
+
+  for (let index = 0; index < dates.length; index += bucketSize) {
+    buckets.push(dates.slice(index, index + bucketSize));
+  }
+
+  return buckets.map((bucket) => {
+    const summary = buildPerformanceSummary(items, completions, bucket);
+    const first = bucket[0];
+    const last = bucket[bucket.length - 1];
+    const label = first === last ? formatBucketDay(first) : `${formatBucketDay(first)}-${formatBucketDay(last)}`;
+
     return {
-      date,
-      percent,
-      label: new Intl.DateTimeFormat("pt-BR", { weekday: "short" }).format(fromDateInput(date)).replace(".", ""),
+      key: `${first}-${last}`,
+      label,
+      percent: summary.percent,
     };
   });
+}
+
+function formatBucketDay(value: string) {
+  return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit" }).format(fromDateInput(value));
 }
 
 function buildPerformanceSummary(items: RouteItem[], completions: CompletionMap, dates: string[]) {
