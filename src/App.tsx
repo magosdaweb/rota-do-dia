@@ -156,6 +156,7 @@ export function App() {
   const [customRule, setCustomRule] = useState<CustomRule>(defaultRule);
   const [customOpen, setCustomOpen] = useState(false);
   const [itemModalOpen, setItemModalOpen] = useState(false);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(today);
   const [viewMode, setViewMode] = useState<"day" | "week">("day");
   const [sectionMode, setSectionMode] = useState<"checklist" | "categories">("checklist");
@@ -262,12 +263,40 @@ export function App() {
     [items],
   );
 
-  async function addItem(event: FormEvent<HTMLFormElement>) {
+  function openNewItemModal() {
+    setEditingItemId(null);
+    setCustomRule(defaultRule);
+    setForm((current) => ({ ...emptyForm, startsOn: selectedDate, category: current.category || activeCategories[0]?.name || "rotina" }));
+    setItemModalOpen(true);
+  }
+
+  function openEditItemModal(item: RouteItem) {
+    setEditingItemId(item.id);
+    setForm({
+      title: item.title,
+      description: item.description,
+      category: item.category,
+      startsOn: item.startsOn,
+      startTime: item.startTime,
+      endTime: item.endTime,
+      repeatType: item.repeatType,
+    });
+    setCustomRule(item.customRule);
+    setItemModalOpen(true);
+  }
+
+  function closeItemModal() {
+    setEditingItemId(null);
+    setItemModalOpen(false);
+  }
+
+  async function saveItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!form.title.trim()) return;
+    const currentItem = editingItemId ? items.find((item) => item.id === editingItemId) : null;
 
     const nextItem: RouteItem = {
-      id: crypto.randomUUID(),
+      id: editingItemId ?? crypto.randomUUID(),
       title: form.title.trim(),
       description: form.description.trim(),
       category: form.category || activeCategories[0]?.name || "rotina",
@@ -276,15 +305,18 @@ export function App() {
       endTime: form.endTime,
       repeatType: form.repeatType,
       customRule,
-      active: true,
+      active: currentItem?.active ?? true,
     };
 
-    setItems((current) => [...current, nextItem]);
+    setItems((current) => (editingItemId ? current.map((item) => (item.id === editingItemId ? nextItem : item)) : [...current, nextItem]));
     setForm({ ...emptyForm, startsOn: selectedDate, category: activeCategories[0]?.name || "rotina" });
-    setItemModalOpen(false);
+    closeItemModal();
 
     if (supabase) {
-      const { error } = await supabase.from("route_items").insert(toDbItem(nextItem));
+      const query = editingItemId
+        ? supabase.from("route_items").update(toDbItem(nextItem)).eq("id", editingItemId)
+        : supabase.from("route_items").insert(toDbItem(nextItem));
+      const { error } = await query;
       setSyncState(error ? "local" : "supabase");
     }
   }
@@ -420,10 +452,7 @@ export function App() {
           <button
             className="primary-button add-item-button"
             type="button"
-            onClick={() => {
-              setForm((current) => ({ ...current, startsOn: selectedDate, category: current.category || activeCategories[0]?.name || "rotina" }));
-              setItemModalOpen(true);
-            }}
+            onClick={openNewItemModal}
           >
             <Plus size={18} />
             Cadastrar item
@@ -605,9 +634,14 @@ export function App() {
                     {item.description && <p className="route-description">{item.description}</p>}
                     <p className="route-meta">{item.category} · {repeatLabel(item)}</p>
                   </div>
-                  <button className="icon-button" type="button" onClick={() => removeItem(item.id)} aria-label="remover">
-                    <Trash2 size={18} />
-                  </button>
+                  <div className="item-actions">
+                    <button className="icon-button" type="button" onClick={() => openEditItemModal(item)} aria-label="editar item">
+                      <Pencil size={18} />
+                    </button>
+                    <button className="icon-button" type="button" onClick={() => removeItem(item.id)} aria-label="remover">
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
                 </article>
               );
             })}
@@ -662,14 +696,14 @@ export function App() {
           <section className="item-modal">
             <div className="modal-heading">
               <div>
-                <p className="eyebrow">Novo item</p>
-                <h2>Adicionar tarefa</h2>
+                <p className="eyebrow">{editingItemId ? "Editar item" : "Novo item"}</p>
+                <h2>{editingItemId ? "Editar tarefa" : "Adicionar tarefa"}</h2>
               </div>
-              <button className="icon-button" type="button" onClick={() => setItemModalOpen(false)} aria-label="fechar">
+              <button className="icon-button" type="button" onClick={closeItemModal} aria-label="fechar">
                 <X size={18} />
               </button>
             </div>
-            <form onSubmit={addItem} className="item-form">
+            <form onSubmit={saveItem} className="item-form">
               <label>
                 Título
                 <input
@@ -750,7 +784,7 @@ export function App() {
               )}
               <button className="primary-button" type="submit">
                 <Plus size={18} />
-                Adicionar
+                {editingItemId ? "Salvar" : "Adicionar"}
               </button>
             </form>
           </section>

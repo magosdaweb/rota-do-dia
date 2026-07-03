@@ -497,7 +497,7 @@ textarea {
 
 .route-item {
   display: grid;
-  grid-template-columns: 34px 145px 1fr 42px;
+  grid-template-columns: 34px 145px 1fr auto;
   align-items: center;
   gap: 14px;
   min-height: 74px;
@@ -561,6 +561,11 @@ textarea {
   width: 42px;
   color: #8b5cf6;
   background: #fbf7ff;
+}
+
+.item-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .empty-state {
@@ -833,6 +838,10 @@ textarea {
 
   .check-button {
     width: 34px;
+  }
+
+  .item-actions .icon-button {
+    width: 42px;
   }
 
   .custom-modal {
