@@ -3,6 +3,8 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Clock3,
   Pencil,
   PieChart,
@@ -253,6 +255,10 @@ export function App() {
     () => categories.filter((category) => category.active).sort((a, b) => a.name.localeCompare(b.name)),
     [categories],
   );
+
+  function moveSelectedDate(direction: -1 | 1) {
+    setSelectedDate((current) => addDays(current, direction * (viewMode === "week" ? 7 : 1)));
+  }
   const categoryCounts = useMemo(
     () =>
       items.reduce<Record<string, number>>((acc, item) => {
@@ -536,7 +542,15 @@ export function App() {
                     Semana
                   </button>
                 </div>
-                <input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
+                <div className="date-navigation">
+                  <button className="icon-button date-arrow" type="button" onClick={() => moveSelectedDate(-1)} aria-label="período anterior">
+                    <ChevronLeft size={18} />
+                  </button>
+                  <input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
+                  <button className="icon-button date-arrow" type="button" onClick={() => moveSelectedDate(1)} aria-label="próximo período">
+                    <ChevronRight size={18} />
+                  </button>
+                </div>
               </>
             )}
           </div>

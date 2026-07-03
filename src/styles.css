@@ -377,6 +377,23 @@ textarea {
   max-width: 180px;
 }
 
+.date-navigation {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.date-navigation input {
+  width: 170px;
+}
+
+.date-arrow {
+  width: 42px;
+  color: #7c3aed;
+  background: #fbf9ff;
+  border: 1px solid #d8c5ff;
+}
+
 .route-controls {
   display: flex;
   align-items: center;
@@ -801,9 +818,14 @@ textarea {
   }
 
   .route-toolbar input,
+  .date-navigation,
   .add-item-button {
     width: 100%;
     max-width: none;
+  }
+
+  .date-navigation input {
+    flex: 1;
   }
 
   .top-actions,
@@ -834,6 +856,11 @@ textarea {
 
   .icon-button {
     width: 100%;
+  }
+
+  .date-arrow {
+    width: 42px;
+    flex: 0 0 42px;
   }
 
   .check-button {
