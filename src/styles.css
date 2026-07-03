@@ -141,39 +141,6 @@ h3 {
   grid-column: 1 / -1;
 }
 
-.range-label {
-  margin: 6px 0 0;
-  color: #7b7288;
-  font-size: 0.88rem;
-}
-
-.performance-range {
-  display: grid;
-  grid-column: 1 / -1;
-  grid-template-columns: repeat(2, minmax(150px, 1fr)) auto;
-  align-items: end;
-  gap: 10px;
-}
-
-.performance-range input {
-  padding: 10px 11px;
-}
-
-.range-presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.range-presets button {
-  min-height: 40px;
-  border: 1px solid #d8c5ff;
-  border-radius: 8px;
-  padding: 0 12px;
-  background: #fbf9ff;
-  color: #6d28d9;
-}
-
 .progress-ring {
   display: grid;
   width: 160px;
@@ -193,7 +160,7 @@ h3 {
 
 .mini-bars {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(30px, 1fr));
+  grid-template-columns: repeat(7, 1fr);
   align-items: end;
   gap: 8px;
   min-height: 126px;
@@ -530,7 +497,7 @@ textarea {
 
 .route-item {
   display: grid;
-  grid-template-columns: 34px 145px 1fr auto;
+  grid-template-columns: 34px 145px 1fr 42px;
   align-items: center;
   gap: 14px;
   min-height: 74px;
@@ -594,11 +561,6 @@ textarea {
   width: 42px;
   color: #8b5cf6;
   background: #fbf7ff;
-}
-
-.item-actions {
-  display: flex;
-  gap: 8px;
 }
 
 .empty-state {
@@ -853,7 +815,6 @@ textarea {
   .route-item,
   .inline-controls,
   .time-donut-layout,
-  .performance-range,
   .category-form {
     grid-template-columns: 1fr;
   }
@@ -872,14 +833,6 @@ textarea {
 
   .check-button {
     width: 34px;
-  }
-
-  .range-presets button {
-    flex: 1;
-  }
-
-  .item-actions .icon-button {
-    width: 42px;
   }
 
   .custom-modal {
