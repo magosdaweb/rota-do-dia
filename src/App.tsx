@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock3,
+  Pencil,
   PieChart,
   Plus,
   Tag,
@@ -150,6 +151,8 @@ export function App() {
   const [completions, setCompletions] = useState<CompletionMap>(() => readLocal("rota_completions", {}));
   const [form, setForm] = useState(emptyForm);
   const [newCategory, setNewCategory] = useState("");
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState("");
   const [customRule, setCustomRule] = useState<CustomRule>(defaultRule);
   const [customOpen, setCustomOpen] = useState(false);
   const [itemModalOpen, setItemModalOpen] = useState(false);
@@ -227,17 +230,36 @@ export function App() {
     [items, selectedDate],
   );
 
-  const doneToday = dayItems.filter((item) => completions[item.id]?.[selectedDate]).length;
-  const todayPercent = dayItems.length ? Math.round((doneToday / dayItems.length) * 100) : 0;
-  const performance = useMemo(() => buildPerformance(items, completions, selectedDate), [items, completions, selectedDate]);
+  const weekDays = useMemo(() => buildWeekDays(selectedDate), [selectedDate]);
+  const performanceDates = useMemo(
+    () => (viewMode === "week" ? weekDays : buildTrailingDays(selectedDate)),
+    [selectedDate, viewMode, weekDays],
+  );
+  const performanceSummaryDates = useMemo(
+    () => (viewMode === "week" ? weekDays : [selectedDate]),
+    [selectedDate, viewMode, weekDays],
+  );
+  const performance = useMemo(() => buildPerformance(items, completions, performanceDates), [items, completions, performanceDates]);
+  const performanceSummary = useMemo(
+    () => buildPerformanceSummary(items, completions, performanceSummaryDates),
+    [items, completions, performanceSummaryDates],
+  );
   const occupancy = useMemo(() => buildOccupancy(dayItems), [dayItems]);
   const totalMinutes = occupancy.reduce((sum, item) => sum + item.minutes, 0);
   const biggestBlock = occupancy[0];
-  const weekDays = useMemo(() => buildWeekDays(selectedDate), [selectedDate]);
   const timeGradient = buildDonutGradient(occupancy, totalMinutes);
   const activeCategories = useMemo(
     () => categories.filter((category) => category.active).sort((a, b) => a.name.localeCompare(b.name)),
     [categories],
+  );
+  const categoryCounts = useMemo(
+    () =>
+      items.reduce<Record<string, number>>((acc, item) => {
+        const key = categoryKey(item.category);
+        acc[key] = (acc[key] ?? 0) + 1;
+        return acc;
+      }, {}),
+    [items],
   );
 
   async function addItem(event: FormEvent<HTMLFormElement>) {
@@ -330,10 +352,47 @@ export function App() {
     }
   }
 
+  function startEditCategory(category: RouteCategory) {
+    setEditingCategoryId(category.id);
+    setEditingCategoryName(category.name);
+  }
+
+  function cancelEditCategory() {
+    setEditingCategoryId(null);
+    setEditingCategoryName("");
+  }
+
+  async function saveCategory(categoryId: string) {
+    const name = editingCategoryName.trim();
+    const category = categories.find((current) => current.id === categoryId);
+    if (!category || !name) return;
+    if (categories.some((current) => current.id !== categoryId && categoryKey(current.name) === categoryKey(name))) return;
+
+    const oldName = category.name;
+    const itemIdsToUpdate = items.filter((item) => categoryKey(item.category) === categoryKey(oldName)).map((item) => item.id);
+    setCategories((current) => current.map((item) => (item.id === categoryId ? { ...item, name } : item)));
+    setItems((current) => current.map((item) => (categoryKey(item.category) === categoryKey(oldName) ? { ...item, category: name } : item)));
+    setForm((current) => (categoryKey(current.category) === categoryKey(oldName) ? { ...current, category: name } : current));
+    cancelEditCategory();
+
+    if (supabase) {
+      const categoryResponse = await supabase.from("route_categories").update({ name }).eq("id", categoryId);
+      let itemsError = null;
+      if (itemIdsToUpdate.length) {
+        const itemsResponse = await supabase.from("route_items").update({ category: name }).in("id", itemIdsToUpdate);
+        itemsError = itemsResponse.error;
+      }
+      setSyncState(categoryResponse.error || itemsError ? "local" : "supabase");
+    }
+  }
+
   async function removeCategory(categoryId: string) {
     const category = categories.find((current) => current.id === categoryId);
     const nextCategories = categories.filter((current) => current.id !== categoryId);
     setCategories(nextCategories);
+    if (editingCategoryId === categoryId) {
+      cancelEditCategory();
+    }
     if (category && form.category === category.name) {
       setForm((current) => ({ ...current, category: nextCategories[0]?.name || "rotina" }));
     }
@@ -377,12 +436,12 @@ export function App() {
           <div className="panel-heading">
             <div>
               <p className="eyebrow">Performance</p>
-              <h2>{todayPercent}% concluído</h2>
+              <h2>{performanceSummary.percent}% concluído</h2>
             </div>
             <CheckCircle2 />
           </div>
-          <div className="progress-ring" style={{ "--value": `${todayPercent * 3.6}deg` } as React.CSSProperties}>
-            <span>{doneToday}/{dayItems.length}</span>
+          <div className="progress-ring" style={{ "--value": `${performanceSummary.percent * 3.6}deg` } as React.CSSProperties}>
+            <span>{performanceSummary.done}/{performanceSummary.total}</span>
           </div>
           <div className="mini-bars" aria-label="desempenho dos últimos sete dias">
             {performance.map((item) => (
@@ -471,18 +530,61 @@ export function App() {
               </button>
             </form>
             <div className="category-list">
-              {activeCategories.map((category) => (
-                <article className="category-item" key={category.id}>
-                  <div>
-                    <i style={{ background: category.color }} />
-                    <Tag size={16} />
-                    <strong>{category.name}</strong>
-                  </div>
-                  <button className="icon-button" type="button" onClick={() => removeCategory(category.id)} aria-label="remover categoria">
-                    <Trash2 size={18} />
-                  </button>
-                </article>
-              ))}
+              {activeCategories.map((category) => {
+                const isEditing = editingCategoryId === category.id;
+                const taskCount = categoryCounts[categoryKey(category.name)] ?? 0;
+
+                return (
+                  <article className="category-item" key={category.id}>
+                    <div className="category-info">
+                      <i style={{ background: category.color }} />
+                      <Tag size={16} />
+                      {isEditing ? (
+                        <input
+                          className="category-edit-input"
+                          value={editingCategoryName}
+                          onChange={(event) => setEditingCategoryName(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              saveCategory(category.id);
+                            }
+                            if (event.key === "Escape") {
+                              cancelEditCategory();
+                            }
+                          }}
+                        />
+                      ) : (
+                        <div className="category-copy">
+                          <strong>{category.name}</strong>
+                          <span>{formatTaskCount(taskCount)}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className="category-actions">
+                      {isEditing ? (
+                        <>
+                          <button className="icon-button" type="button" onClick={() => saveCategory(category.id)} aria-label="salvar categoria">
+                            <Check size={18} />
+                          </button>
+                          <button className="icon-button" type="button" onClick={cancelEditCategory} aria-label="cancelar edição">
+                            <X size={18} />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button className="icon-button" type="button" onClick={() => startEditCategory(category)} aria-label="editar categoria">
+                            <Pencil size={18} />
+                          </button>
+                          <button className="icon-button" type="button" onClick={() => removeCategory(category.id)} aria-label="remover categoria">
+                            <Trash2 size={18} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           </div>
         ) : viewMode === "day" ? (
@@ -800,6 +902,10 @@ function buildWeekDays(value: string) {
   return Array.from({ length: 7 }, (_, index) => addDays(start, index));
 }
 
+function buildTrailingDays(value: string) {
+  return Array.from({ length: 7 }, (_, index) => addDays(value, index - 6));
+}
+
 function formatWeekRange(days: string[]) {
   if (!days.length) return "";
   const first = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" }).format(fromDateInput(days[0]));
@@ -881,9 +987,8 @@ function occursOn(item: RouteItem, dateValue: string) {
   return yearDiff % Math.max(rule.interval, 1) === 0 && date.getDate() === start.getDate() && date.getMonth() === start.getMonth();
 }
 
-function buildPerformance(items: RouteItem[], completions: CompletionMap, selectedDate: string) {
-  return Array.from({ length: 7 }, (_, index) => {
-    const date = addDays(selectedDate, index - 6);
+function buildPerformance(items: RouteItem[], completions: CompletionMap, dates: string[]) {
+  return dates.map((date) => {
     const due = items.filter((item) => occursOn(item, date));
     const done = due.filter((item) => completions[item.id]?.[date]).length;
     const percent = due.length ? Math.round((done / due.length) * 100) : 0;
@@ -893,6 +998,25 @@ function buildPerformance(items: RouteItem[], completions: CompletionMap, select
       label: new Intl.DateTimeFormat("pt-BR", { weekday: "short" }).format(fromDateInput(date)).replace(".", ""),
     };
   });
+}
+
+function buildPerformanceSummary(items: RouteItem[], completions: CompletionMap, dates: string[]) {
+  const summary = dates.reduce(
+    (acc, date) => {
+      const due = items.filter((item) => occursOn(item, date));
+      const done = due.filter((item) => completions[item.id]?.[date]).length;
+      return {
+        done: acc.done + done,
+        total: acc.total + due.length,
+      };
+    },
+    { done: 0, total: 0 },
+  );
+
+  return {
+    ...summary,
+    percent: summary.total ? Math.round((summary.done / summary.total) * 100) : 0,
+  };
 }
 
 function buildOccupancy(items: RouteItem[]) {
@@ -935,6 +1059,18 @@ function unitLabel(unit: CustomUnit) {
   if (unit === "week") return "semana(s)";
   if (unit === "month") return "mês(es)";
   return "ano(s)";
+}
+
+function categoryKey(value: string) {
+  return value
+    .trim()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function formatTaskCount(count: number) {
+  return `${count} ${count === 1 ? "tarefa" : "tarefas"}`;
 }
 
 function toggleWeekday(index: number, rule: CustomRule, setRule: (rule: CustomRule) => void) {

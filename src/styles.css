@@ -436,7 +436,7 @@ textarea {
 
 .category-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 12px;
 }
 
@@ -452,10 +452,12 @@ textarea {
   background: #ffffff;
 }
 
-.category-item > div {
+.category-info {
   display: flex;
   align-items: center;
+  flex: 1;
   gap: 10px;
+  min-width: 0;
 }
 
 .category-item i {
@@ -470,6 +472,27 @@ textarea {
 
 .category-item strong {
   font-weight: 600;
+}
+
+.category-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.category-copy span {
+  color: #7b7288;
+  font-size: 0.86rem;
+}
+
+.category-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.category-edit-input {
+  min-width: 0;
+  padding: 9px 10px;
 }
 
 .route-item {
