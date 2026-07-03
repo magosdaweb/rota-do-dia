@@ -1,10 +1,12 @@
 import {
   CalendarDays,
+  Check,
   CheckCircle2,
   ChevronDown,
   Clock3,
   PieChart,
   Plus,
+  Tag,
   Trash2,
   X,
 } from "lucide-react";
@@ -26,6 +28,7 @@ type CustomRule = {
 type RouteItem = {
   id: string;
   title: string;
+  description: string;
   category: string;
   startsOn: string;
   startTime: string;
@@ -40,6 +43,7 @@ type CompletionMap = Record<string, Record<string, boolean>>;
 type DbItem = {
   id: string;
   title: string;
+  description: string | null;
   category: string;
   starts_on: string;
   start_time: string;
@@ -53,6 +57,20 @@ type DbCompletion = {
   item_id: string;
   completed_on: string;
   completed: boolean;
+};
+
+type RouteCategory = {
+  id: string;
+  name: string;
+  color: string;
+  active: boolean;
+};
+
+type DbCategory = {
+  id: string;
+  name: string;
+  color: string;
+  active: boolean;
 };
 
 const weekLabels = ["D", "S", "T", "Q", "Q", "S", "S"];
@@ -72,6 +90,7 @@ const initialItems: RouteItem[] = [
   {
     id: crypto.randomUUID(),
     title: "Planejar prioridades",
+    description: "",
     category: "planejamento",
     startsOn: today,
     startTime: "08:30",
@@ -83,6 +102,7 @@ const initialItems: RouteItem[] = [
   {
     id: crypto.randomUUID(),
     title: "Execução focada",
+    description: "",
     category: "trabalho",
     startsOn: today,
     startTime: "09:00",
@@ -94,7 +114,8 @@ const initialItems: RouteItem[] = [
   {
     id: crypto.randomUUID(),
     title: "Revisão do dia",
-    category: "gestao",
+    description: "",
+    category: "gestão",
     startsOn: today,
     startTime: "17:30",
     endTime: "18:00",
@@ -104,8 +125,18 @@ const initialItems: RouteItem[] = [
   },
 ];
 
+const defaultCategories: RouteCategory[] = [
+  { id: crypto.randomUUID(), name: "rotina", color: "#7c3aed", active: true },
+  { id: crypto.randomUUID(), name: "trabalho", color: "#8b5cf6", active: true },
+  { id: crypto.randomUUID(), name: "planejamento", color: "#a855f7", active: true },
+  { id: crypto.randomUUID(), name: "gestão", color: "#c084fc", active: true },
+  { id: crypto.randomUUID(), name: "estudo", color: "#6d28d9", active: true },
+  { id: crypto.randomUUID(), name: "saúde", color: "#d8b4fe", active: true },
+];
+
 const emptyForm = {
   title: "",
+  description: "",
   category: "rotina",
   startsOn: today,
   startTime: "09:00",
@@ -114,19 +145,26 @@ const emptyForm = {
 };
 
 export function App() {
-  const [items, setItems] = useState<RouteItem[]>(() => readLocal("rota_items", initialItems));
+  const [items, setItems] = useState<RouteItem[]>(() => readLocal("rota_items", initialItems).map(withItemDefaults));
+  const [categories, setCategories] = useState<RouteCategory[]>(() => readLocal("rota_categories", defaultCategories));
   const [completions, setCompletions] = useState<CompletionMap>(() => readLocal("rota_completions", {}));
   const [form, setForm] = useState(emptyForm);
+  const [newCategory, setNewCategory] = useState("");
   const [customRule, setCustomRule] = useState<CustomRule>(defaultRule);
   const [customOpen, setCustomOpen] = useState(false);
   const [itemModalOpen, setItemModalOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState(today);
   const [viewMode, setViewMode] = useState<"day" | "week">("day");
+  const [sectionMode, setSectionMode] = useState<"checklist" | "categories">("checklist");
   const [syncState, setSyncState] = useState("local");
 
   useEffect(() => {
     localStorage.setItem("rota_items", JSON.stringify(items));
   }, [items]);
+
+  useEffect(() => {
+    localStorage.setItem("rota_categories", JSON.stringify(categories));
+  }, [categories]);
 
   useEffect(() => {
     localStorage.setItem("rota_completions", JSON.stringify(completions));
@@ -142,9 +180,10 @@ export function App() {
         await supabase.auth.signInAnonymously();
       }
 
-      const [itemsResponse, completionsResponse] = await Promise.all([
+      const [itemsResponse, completionsResponse, categoriesResponse] = await Promise.all([
         supabase.from("route_items").select("*").order("start_time"),
         supabase.from("route_completions").select("*"),
+        supabase.from("route_categories").select("*").order("name"),
       ]);
 
       if (cancelled) return;
@@ -159,6 +198,18 @@ export function App() {
         setItems(remoteItems);
       }
       setCompletions(remoteCompletions);
+
+      if (!categoriesResponse.error) {
+        const remoteCategories = (categoriesResponse.data ?? []).map(fromDbCategory);
+        if (remoteCategories.length > 0) {
+          setCategories(remoteCategories);
+        } else {
+          const seededCategories = defaultCategories.map((category) => ({ ...category, id: crypto.randomUUID() }));
+          setCategories(seededCategories);
+          await supabase.from("route_categories").insert(seededCategories.map(toDbCategory));
+        }
+      }
+
       setSyncState("supabase");
     }
 
@@ -184,6 +235,10 @@ export function App() {
   const biggestBlock = occupancy[0];
   const weekDays = useMemo(() => buildWeekDays(selectedDate), [selectedDate]);
   const timeGradient = buildDonutGradient(occupancy, totalMinutes);
+  const activeCategories = useMemo(
+    () => categories.filter((category) => category.active).sort((a, b) => a.name.localeCompare(b.name)),
+    [categories],
+  );
 
   async function addItem(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -192,7 +247,8 @@ export function App() {
     const nextItem: RouteItem = {
       id: crypto.randomUUID(),
       title: form.title.trim(),
-      category: form.category.trim() || "rotina",
+      description: form.description.trim(),
+      category: form.category || activeCategories[0]?.name || "rotina",
       startsOn: form.startsOn,
       startTime: form.startTime,
       endTime: form.endTime,
@@ -202,7 +258,7 @@ export function App() {
     };
 
     setItems((current) => [...current, nextItem]);
-    setForm({ ...emptyForm, startsOn: selectedDate });
+    setForm({ ...emptyForm, startsOn: selectedDate, category: activeCategories[0]?.name || "rotina" });
     setItemModalOpen(false);
 
     if (supabase) {
@@ -249,6 +305,45 @@ export function App() {
     }
   }
 
+  async function addCategory(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = newCategory.trim();
+    if (!name) return;
+    if (categories.some((category) => category.name.toLowerCase() === name.toLowerCase())) {
+      setNewCategory("");
+      return;
+    }
+
+    const nextCategory: RouteCategory = {
+      id: crypto.randomUUID(),
+      name,
+      color: donutColors[categories.length % donutColors.length],
+      active: true,
+    };
+
+    setCategories((current) => [...current, nextCategory]);
+    setNewCategory("");
+
+    if (supabase) {
+      const { error } = await supabase.from("route_categories").insert(toDbCategory(nextCategory));
+      setSyncState(error ? "local" : "supabase");
+    }
+  }
+
+  async function removeCategory(categoryId: string) {
+    const category = categories.find((current) => current.id === categoryId);
+    const nextCategories = categories.filter((current) => current.id !== categoryId);
+    setCategories(nextCategories);
+    if (category && form.category === category.name) {
+      setForm((current) => ({ ...current, category: nextCategories[0]?.name || "rotina" }));
+    }
+
+    if (supabase) {
+      const { error } = await supabase.from("route_categories").delete().eq("id", categoryId);
+      setSyncState(error ? "local" : "supabase");
+    }
+  }
+
   function chooseRepeatType(repeatType: RepeatType) {
     setForm((current) => ({ ...current, repeatType }));
     if (repeatType === "custom") {
@@ -259,9 +354,8 @@ export function App() {
   return (
     <main className="app-shell">
       <section className="topbar">
-        <div>
-          <p className="eyebrow">Checklist</p>
-          <h1>Rota do dia</h1>
+        <div className="brand-block">
+          <img className="app-logo" src="/rota-do-dia-logo.png" alt="Rota do dia" />
         </div>
         <div className="top-actions">
           <div className="sync-pill">{syncState === "supabase" ? "Supabase ativo" : "Modo local"}</div>
@@ -269,7 +363,7 @@ export function App() {
             className="primary-button add-item-button"
             type="button"
             onClick={() => {
-              setForm((current) => ({ ...current, startsOn: selectedDate }));
+              setForm((current) => ({ ...current, startsOn: selectedDate, category: current.category || activeCategories[0]?.name || "rotina" }));
               setItemModalOpen(true);
             }}
           >
@@ -333,30 +427,73 @@ export function App() {
       <section className="route-section">
         <div className="route-toolbar">
           <div>
-            <p className="eyebrow">Agenda</p>
-            <h2>{viewMode === "day" ? formatDateLabel(selectedDate) : formatWeekRange(weekDays)}</h2>
+            <p className="eyebrow">{sectionMode === "checklist" ? "Agenda" : "Categorias"}</p>
+            <h2>{sectionMode === "checklist" ? (viewMode === "day" ? formatDateLabel(selectedDate) : formatWeekRange(weekDays)) : "Pré-cadastros"}</h2>
           </div>
           <div className="route-controls">
-            <div className="segmented-control" aria-label="alternar visualização">
-              <button className={viewMode === "day" ? "active" : ""} type="button" onClick={() => setViewMode("day")}>
-                Dia
+            <div className="segmented-control section-tabs" aria-label="alternar seção">
+              <button className={sectionMode === "checklist" ? "active" : ""} type="button" onClick={() => setSectionMode("checklist")}>
+                Checklist
               </button>
-              <button className={viewMode === "week" ? "active" : ""} type="button" onClick={() => setViewMode("week")}>
-                Semana
+              <button className={sectionMode === "categories" ? "active" : ""} type="button" onClick={() => setSectionMode("categories")}>
+                Categorias
               </button>
             </div>
-            <input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
+            {sectionMode === "checklist" && (
+              <>
+                <div className="segmented-control" aria-label="alternar visualização">
+                  <button className={viewMode === "day" ? "active" : ""} type="button" onClick={() => setViewMode("day")}>
+                    Dia
+                  </button>
+                  <button className={viewMode === "week" ? "active" : ""} type="button" onClick={() => setViewMode("week")}>
+                    Semana
+                  </button>
+                </div>
+                <input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} />
+              </>
+            )}
           </div>
         </div>
 
-        {viewMode === "day" ? (
+        {sectionMode === "categories" ? (
+          <div className="categories-manager">
+            <form className="category-form" onSubmit={addCategory}>
+              <label>
+                Nova categoria
+                <input
+                  value={newCategory}
+                  onChange={(event) => setNewCategory(event.target.value)}
+                  placeholder="Ex.: cliente, estudo, treino"
+                />
+              </label>
+              <button className="primary-button" type="submit">
+                <Plus size={18} />
+                Adicionar categoria
+              </button>
+            </form>
+            <div className="category-list">
+              {activeCategories.map((category) => (
+                <article className="category-item" key={category.id}>
+                  <div>
+                    <i style={{ background: category.color }} />
+                    <Tag size={16} />
+                    <strong>{category.name}</strong>
+                  </div>
+                  <button className="icon-button" type="button" onClick={() => removeCategory(category.id)} aria-label="remover categoria">
+                    <Trash2 size={18} />
+                  </button>
+                </article>
+              ))}
+            </div>
+          </div>
+        ) : viewMode === "day" ? (
           <div className="route-list">
             {dayItems.map((item) => {
               const completed = Boolean(completions[item.id]?.[selectedDate]);
               return (
                 <article className={`route-item ${completed ? "done" : ""}`} key={item.id}>
-                  <button className="check-button" type="button" onClick={() => toggleItem(item.id)}>
-                    <CheckCircle2 />
+                  <button className={`check-button ${completed ? "checked" : ""}`} type="button" onClick={() => toggleItem(item.id)} aria-label="marcar item">
+                    {completed && <Check size={18} />}
                   </button>
                   <div className="route-time">
                     <Clock3 size={16} />
@@ -364,7 +501,8 @@ export function App() {
                   </div>
                   <div className="route-copy">
                     <h3>{item.title}</h3>
-                    <p>{item.category} · {repeatLabel(item)}</p>
+                    {item.description && <p className="route-description">{item.description}</p>}
+                    <p className="route-meta">{item.category} · {repeatLabel(item)}</p>
                   </div>
                   <button className="icon-button" type="button" onClick={() => removeItem(item.id)} aria-label="remover">
                     <Trash2 size={18} />
@@ -404,6 +542,7 @@ export function App() {
                         >
                           <span>{item.startTime} - {item.endTime}</span>
                           <strong>{item.title}</strong>
+                          {item.description && <small className="week-description">{item.description}</small>}
                           <small>{item.category}</small>
                         </button>
                       );
@@ -438,6 +577,15 @@ export function App() {
                   placeholder="Ex.: estudo, treino, reunião"
                 />
               </label>
+              <label>
+                Descrição
+                <textarea
+                  value={form.description}
+                  onChange={(event) => setForm({ ...form, description: event.target.value })}
+                  placeholder="Detalhes do que precisa ser feito"
+                  rows={3}
+                />
+              </label>
               <div className="form-row">
                 <label>
                   Data
@@ -449,11 +597,16 @@ export function App() {
                 </label>
                 <label>
                   Categoria
-                  <input
-                    value={form.category}
-                    onChange={(event) => setForm({ ...form, category: event.target.value })}
-                    placeholder="rotina"
-                  />
+                  <div className="select-wrap">
+                    <select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>
+                      {activeCategories.map((category) => (
+                        <option key={category.id} value={category.name}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown />
+                  </div>
                 </label>
               </div>
               <div className="form-row">
@@ -616,6 +769,13 @@ function readLocal<T>(key: string, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function withItemDefaults(item: RouteItem): RouteItem {
+  return {
+    ...item,
+    description: item.description ?? "",
+  };
 }
 
 function toDateInput(date: Date) {
@@ -788,6 +948,7 @@ function toDbItem(item: RouteItem) {
   return {
     id: item.id,
     title: item.title,
+    description: item.description,
     category: item.category,
     starts_on: item.startsOn,
     start_time: item.startTime,
@@ -802,6 +963,7 @@ function fromDbItem(item: DbItem): RouteItem {
   return {
     id: item.id,
     title: item.title,
+    description: item.description ?? "",
     category: item.category,
     startsOn: item.starts_on,
     startTime: item.start_time.slice(0, 5),
@@ -809,6 +971,24 @@ function fromDbItem(item: DbItem): RouteItem {
     repeatType: item.repeat_type,
     customRule: item.custom_rule,
     active: item.active,
+  };
+}
+
+function toDbCategory(category: RouteCategory) {
+  return {
+    id: category.id,
+    name: category.name,
+    color: category.color,
+    active: category.active,
+  };
+}
+
+function fromDbCategory(category: DbCategory): RouteCategory {
+  return {
+    id: category.id,
+    name: category.name,
+    color: category.color,
+    active: category.active,
   };
 }
 
