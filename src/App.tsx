@@ -358,7 +358,6 @@ export function App() {
           <img className="app-logo" src="/rota-do-dia-logo.png" alt="Rota do dia" />
         </div>
         <div className="top-actions">
-          <div className="sync-pill">{syncState === "supabase" ? "Supabase ativo" : "Modo local"}</div>
           <button
             className="primary-button add-item-button"
             type="button"

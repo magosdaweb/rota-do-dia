@@ -103,18 +103,6 @@ h3 {
   justify-content: flex-end;
 }
 
-.sync-pill {
-  min-width: 118px;
-  border: 1px solid #dfd1ff;
-  border-radius: 999px;
-  padding: 10px 14px;
-  background: #ffffff;
-  color: #6d28d9;
-  font-size: 0.86rem;
-  font-weight: 400;
-  text-align: center;
-}
-
 .add-item-button {
   min-width: 178px;
   padding: 0 18px;
@@ -486,7 +474,7 @@ textarea {
 
 .route-item {
   display: grid;
-  grid-template-columns: 44px 145px 1fr 42px;
+  grid-template-columns: 34px 145px 1fr 42px;
   align-items: center;
   gap: 14px;
   min-height: 74px;
@@ -507,7 +495,8 @@ textarea {
 }
 
 .check-button {
-  width: 42px;
+  width: 34px;
+  min-height: 34px;
   border: 1px solid #d8c5ff;
   color: #8b5cf6;
   background: #ffffff;
@@ -783,7 +772,6 @@ textarea {
     flex-direction: column;
   }
 
-  .sync-pill,
   .route-toolbar input,
   .add-item-button {
     width: 100%;
@@ -816,9 +804,12 @@ textarea {
     align-items: start;
   }
 
-  .icon-button,
-  .check-button {
+  .icon-button {
     width: 100%;
+  }
+
+  .check-button {
+    width: 34px;
   }
 
   .custom-modal {
