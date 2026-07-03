@@ -37,6 +37,20 @@ button {
   padding: 32px 0;
 }
 
+.auth-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  align-content: center;
+  gap: 24px;
+  padding: 32px 16px;
+}
+
+.auth-logo {
+  width: min(230px, 72vw);
+  height: auto;
+}
+
 .topbar,
 .top-actions,
 .route-toolbar,

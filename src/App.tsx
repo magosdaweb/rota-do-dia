@@ -615,6 +615,81 @@ export function App() {
     }
   }
 
+  const userIsLoggedIn = Boolean(currentUserEmail && !isAnonymousUser);
+
+  function renderAuthCard(showClose: boolean) {
+    return (
+      <section className="auth-card">
+        <div className="modal-heading">
+          <div>
+            <p className="eyebrow">Conta</p>
+            <h2>{authMode === "forgot" ? "Recuperar senha" : authMode === "signup" ? "Criar cadastro" : "Entrar"}</h2>
+          </div>
+          {showClose && (
+            <button className="icon-button" type="button" onClick={() => setAuthOpen(false)} aria-label="fechar">
+              <X size={18} />
+            </button>
+          )}
+        </div>
+
+        <div className="segmented-control auth-tabs" aria-label="alternar acesso">
+          <button className={authMode === "login" ? "active" : ""} type="button" onClick={() => openAuth("login")}>
+            Login
+          </button>
+          <button className={authMode === "signup" ? "active" : ""} type="button" onClick={() => openAuth("signup")}>
+            Cadastro
+          </button>
+        </div>
+
+        <form className="auth-form" onSubmit={submitAuth}>
+          <label>
+            E-mail
+            <input
+              type="email"
+              value={authEmail}
+              onChange={(event) => setAuthEmail(event.target.value)}
+              placeholder="seuemail@exemplo.com"
+              required
+            />
+          </label>
+
+          {authMode !== "forgot" && (
+            <label>
+              Senha
+              <input
+                type="password"
+                value={authPassword}
+                onChange={(event) => setAuthPassword(event.target.value)}
+                placeholder="mínimo de 6 caracteres"
+                minLength={6}
+                required
+              />
+            </label>
+          )}
+
+          {authMessage && <p className="auth-message">{authMessage}</p>}
+
+          <button className="primary-button" type="submit" disabled={authLoading}>
+            {authLoading ? "Aguarde..." : authMode === "forgot" ? "Enviar link" : authMode === "signup" ? "Cadastrar" : "Entrar"}
+          </button>
+        </form>
+
+        <button className="link-button" type="button" onClick={() => openAuth(authMode === "forgot" ? "login" : "forgot")}>
+          {authMode === "forgot" ? "Voltar ao login" : "Esqueceu sua senha?"}
+        </button>
+      </section>
+    );
+  }
+
+  if (!userIsLoggedIn) {
+    return (
+      <main className="auth-shell">
+        <img className="auth-logo" src="/rota-do-dia-logo.png" alt="Rota do dia" />
+        {renderAuthCard(false)}
+      </main>
+    );
+  }
+
   return (
     <main className="app-shell">
       <section className="topbar">
@@ -883,63 +958,7 @@ export function App() {
 
       {authOpen && (
         <div className="modal-backdrop" role="dialog" aria-modal="true">
-          <section className="auth-card">
-            <div className="modal-heading">
-              <div>
-                <p className="eyebrow">Conta</p>
-                <h2>{authMode === "forgot" ? "Recuperar senha" : authMode === "signup" ? "Criar cadastro" : "Entrar"}</h2>
-              </div>
-              <button className="icon-button" type="button" onClick={() => setAuthOpen(false)} aria-label="fechar">
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="segmented-control auth-tabs" aria-label="alternar acesso">
-              <button className={authMode === "login" ? "active" : ""} type="button" onClick={() => openAuth("login")}>
-                Login
-              </button>
-              <button className={authMode === "signup" ? "active" : ""} type="button" onClick={() => openAuth("signup")}>
-                Cadastro
-              </button>
-            </div>
-
-            <form className="auth-form" onSubmit={submitAuth}>
-              <label>
-                E-mail
-                <input
-                  type="email"
-                  value={authEmail}
-                  onChange={(event) => setAuthEmail(event.target.value)}
-                  placeholder="seuemail@exemplo.com"
-                  required
-                />
-              </label>
-
-              {authMode !== "forgot" && (
-                <label>
-                  Senha
-                  <input
-                    type="password"
-                    value={authPassword}
-                    onChange={(event) => setAuthPassword(event.target.value)}
-                    placeholder="mínimo de 6 caracteres"
-                    minLength={6}
-                    required
-                  />
-                </label>
-              )}
-
-              {authMessage && <p className="auth-message">{authMessage}</p>}
-
-              <button className="primary-button" type="submit" disabled={authLoading}>
-                {authLoading ? "Aguarde..." : authMode === "forgot" ? "Enviar link" : authMode === "signup" ? "Cadastrar" : "Entrar"}
-              </button>
-            </form>
-
-            <button className="link-button" type="button" onClick={() => openAuth(authMode === "forgot" ? "login" : "forgot")}>
-              {authMode === "forgot" ? "Voltar ao login" : "Esqueceu sua senha?"}
-            </button>
-          </section>
+          {renderAuthCard(true)}
         </div>
       )}
 
